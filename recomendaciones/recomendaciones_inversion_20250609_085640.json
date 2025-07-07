@@ -1,0 +1,538 @@
+{
+    "fecha_generacion": "2025-06-09 08:56:40",
+    "capital_disponible": 10000,
+    "recomendaciones": [
+        {
+            "orden_recomendado": 1,
+            "ticker": "AMZN",
+            "score": 47.5,
+            "precio_actual": 213.57,
+            "tendencias": {
+                "corta": "ALCISTA",
+                "media": "ALCISTA",
+                "larga": "ALCISTA"
+            },
+            "rsi": 66.41,
+            "acciones_recomendadas": 46,
+            "inversion_total": 9824.22,
+            "potencial_ganancia": 1964.84,
+            "razones": [
+                "Fuerza de tendencia: 3/3 timeframes alcistas (peso 20%)",
+                "RSI neutral (66.4)",
+                "MACD positivo",
+                "Precio dentro de las bandas de Bollinger",
+                "Volumen débil (1.0x)",
+                "Stochastic neutral",
+                "Momentum positivo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR alto (5.52), buena volatilidad para movimiento",
+                "CCI neutral (0.0)",
+                "Tendencia alcista confirmada en corto y medio plazo",
+                "Tendencia alcista en largo plazo"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "LARGO"
+        },
+        {
+            "orden_recomendado": 2,
+            "ticker": "GOOGL",
+            "score": 47.5,
+            "precio_actual": 173.68,
+            "tendencias": {
+                "corta": "ALCISTA",
+                "media": "ALCISTA",
+                "larga": "ALCISTA"
+            },
+            "rsi": 61.28,
+            "acciones_recomendadas": 57,
+            "inversion_total": 9899.76,
+            "potencial_ganancia": 1979.95,
+            "razones": [
+                "Fuerza de tendencia: 3/3 timeframes alcistas (peso 20%)",
+                "RSI neutral (61.3)",
+                "MACD positivo",
+                "Precio dentro de las bandas de Bollinger",
+                "Volumen débil (0.8x)",
+                "Stochastic neutral",
+                "Momentum positivo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR alto (4.86), buena volatilidad para movimiento",
+                "CCI neutral (0.0)",
+                "Tendencia alcista confirmada en corto y medio plazo",
+                "Tendencia alcista en largo plazo"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "LARGO"
+        },
+        {
+            "orden_recomendado": 3,
+            "ticker": "NVDA",
+            "score": 47.0,
+            "precio_actual": 141.72,
+            "tendencias": {
+                "corta": "ALCISTA",
+                "media": "ALCISTA",
+                "larga": "ALCISTA"
+            },
+            "rsi": 67.32,
+            "acciones_recomendadas": 70,
+            "inversion_total": 9920.4,
+            "potencial_ganancia": 1984.08,
+            "razones": [
+                "Fuerza de tendencia: 3/3 timeframes alcistas (peso 20%)",
+                "RSI neutral (67.3)",
+                "MACD positivo",
+                "Precio dentro de las bandas de Bollinger",
+                "Volumen débil (0.7x)",
+                "Stochastic en sobrecompra",
+                "Momentum positivo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR alto (4.66), buena volatilidad para movimiento",
+                "CCI neutral (0.0)",
+                "Tendencia alcista confirmada en corto y medio plazo",
+                "Tendencia alcista en largo plazo"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "LARGO"
+        },
+        {
+            "orden_recomendado": 4,
+            "ticker": "PLTR",
+            "score": 46.5,
+            "precio_actual": 127.72,
+            "tendencias": {
+                "corta": "ALCISTA",
+                "media": "ALCISTA",
+                "larga": "ALCISTA"
+            },
+            "rsi": 56.4,
+            "acciones_recomendadas": 78,
+            "inversion_total": 9962.16,
+            "potencial_ganancia": 1992.43,
+            "razones": [
+                "Fuerza de tendencia: 3/3 timeframes alcistas (peso 20%)",
+                "RSI neutral (56.4)",
+                "MACD negativo",
+                "Precio dentro de las bandas de Bollinger",
+                "Volumen débil (1.0x)",
+                "Stochastic neutral",
+                "Momentum positivo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR alto (7.01), buena volatilidad para movimiento",
+                "CCI neutral (0.0)",
+                "Tendencia alcista confirmada en corto y medio plazo",
+                "Tendencia alcista en largo plazo"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "LARGO"
+        },
+        {
+            "orden_recomendado": 5,
+            "ticker": "TSM",
+            "score": 46.5,
+            "precio_actual": 205.18,
+            "tendencias": {
+                "corta": "ALCISTA",
+                "media": "ALCISTA",
+                "larga": "ALCISTA"
+            },
+            "rsi": 70.42,
+            "acciones_recomendadas": 48,
+            "inversion_total": 9848.64,
+            "potencial_ganancia": 1477.3,
+            "razones": [
+                "Fuerza de tendencia: 3/3 timeframes alcistas (peso 20%)",
+                "RSI en sobrecompra (70.4)",
+                "MACD positivo",
+                "Precio dentro de las bandas de Bollinger",
+                "Volumen débil (0.7x)",
+                "Stochastic en sobrecompra",
+                "Momentum positivo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR alto (5.06), buena volatilidad para movimiento",
+                "CCI neutral (0.0)",
+                "Tendencia alcista confirmada en corto y medio plazo",
+                "Tendencia alcista en largo plazo"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "MEDIO"
+        },
+        {
+            "orden_recomendado": 6,
+            "ticker": "SNOW",
+            "score": 46.5,
+            "precio_actual": 210.84,
+            "tendencias": {
+                "corta": "ALCISTA",
+                "media": "ALCISTA",
+                "larga": "ALCISTA"
+            },
+            "rsi": 75.79,
+            "acciones_recomendadas": 47,
+            "inversion_total": 9909.48,
+            "potencial_ganancia": 1486.42,
+            "razones": [
+                "Fuerza de tendencia: 3/3 timeframes alcistas (peso 20%)",
+                "RSI en sobrecompra (75.8)",
+                "MACD positivo",
+                "Precio dentro de las bandas de Bollinger",
+                "Volumen débil (0.6x)",
+                "Stochastic en sobrecompra",
+                "Momentum positivo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR alto (6.46), buena volatilidad para movimiento",
+                "CCI neutral (0.0)",
+                "Tendencia alcista confirmada en corto y medio plazo",
+                "Tendencia alcista en largo plazo"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "MEDIO"
+        },
+        {
+            "orden_recomendado": 7,
+            "ticker": "JPM",
+            "score": 46.0,
+            "precio_actual": 265.73,
+            "tendencias": {
+                "corta": "ALCISTA",
+                "media": "ALCISTA",
+                "larga": "ALCISTA"
+            },
+            "rsi": 61.07,
+            "acciones_recomendadas": 37,
+            "inversion_total": 9832.01,
+            "potencial_ganancia": 1966.4,
+            "razones": [
+                "Fuerza de tendencia: 3/3 timeframes alcistas (peso 20%)",
+                "RSI neutral (61.1)",
+                "MACD negativo",
+                "Precio dentro de las bandas de Bollinger",
+                "Volumen débil (1.0x)",
+                "Stochastic neutral",
+                "Momentum positivo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR bajo (4.82), baja volatilidad",
+                "CCI neutral (0.0)",
+                "Tendencia alcista confirmada en corto y medio plazo",
+                "Tendencia alcista en largo plazo"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "LARGO"
+        },
+        {
+            "orden_recomendado": 8,
+            "ticker": "META",
+            "score": 46.0,
+            "precio_actual": 697.71,
+            "tendencias": {
+                "corta": "ALCISTA",
+                "media": "ALCISTA",
+                "larga": "ALCISTA"
+            },
+            "rsi": 73.34,
+            "acciones_recomendadas": 14,
+            "inversion_total": 9767.94,
+            "potencial_ganancia": 1465.19,
+            "razones": [
+                "Fuerza de tendencia: 3/3 timeframes alcistas (peso 20%)",
+                "RSI en sobrecompra (73.3)",
+                "MACD positivo",
+                "Precio por encima de la banda superior de Bollinger",
+                "Volumen débil (0.9x)",
+                "Stochastic en sobrecompra",
+                "Momentum positivo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR alto (18.40), buena volatilidad para movimiento",
+                "CCI neutral (0.0)",
+                "Tendencia alcista confirmada en corto y medio plazo",
+                "Tendencia alcista en largo plazo"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "MEDIO"
+        },
+        {
+            "orden_recomendado": 9,
+            "ticker": "QQQ",
+            "score": 45.5,
+            "precio_actual": 529.92,
+            "tendencias": {
+                "corta": "ALCISTA",
+                "media": "ALCISTA",
+                "larga": "ALCISTA"
+            },
+            "rsi": 67.35,
+            "acciones_recomendadas": 18,
+            "inversion_total": 9538.56,
+            "potencial_ganancia": 1907.71,
+            "razones": [
+                "Fuerza de tendencia: 3/3 timeframes alcistas (peso 20%)",
+                "RSI neutral (67.4)",
+                "MACD negativo",
+                "Precio dentro de las bandas de Bollinger",
+                "Volumen débil (0.8x)",
+                "Stochastic en sobrecompra",
+                "Momentum positivo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR bajo (8.90), baja volatilidad",
+                "CCI neutral (0.0)",
+                "Tendencia alcista confirmada en corto y medio plazo",
+                "Tendencia alcista en largo plazo"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "LARGO"
+        },
+        {
+            "orden_recomendado": 10,
+            "ticker": "SPY",
+            "score": 45.5,
+            "precio_actual": 599.14,
+            "tendencias": {
+                "corta": "ALCISTA",
+                "media": "ALCISTA",
+                "larga": "ALCISTA"
+            },
+            "rsi": 65.07,
+            "acciones_recomendadas": 16,
+            "inversion_total": 9586.24,
+            "potencial_ganancia": 1917.25,
+            "razones": [
+                "Fuerza de tendencia: 3/3 timeframes alcistas (peso 20%)",
+                "RSI neutral (65.1)",
+                "MACD negativo",
+                "Precio dentro de las bandas de Bollinger",
+                "Volumen débil (0.9x)",
+                "Stochastic en sobrecompra",
+                "Momentum positivo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR bajo (8.34), baja volatilidad",
+                "CCI neutral (0.0)",
+                "Tendencia alcista confirmada en corto y medio plazo",
+                "Tendencia alcista en largo plazo"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "LARGO"
+        },
+        {
+            "orden_recomendado": 11,
+            "ticker": "MELI",
+            "score": 28.5,
+            "precio_actual": 2482.39,
+            "tendencias": {
+                "corta": "BAJISTA",
+                "media": "ALCISTA",
+                "larga": "ALCISTA"
+            },
+            "rsi": 51.36,
+            "acciones_recomendadas": 4,
+            "inversion_total": 9929.56,
+            "potencial_ganancia": 1489.43,
+            "razones": [
+                "Fuerza de tendencia: 2/3 timeframes alcistas (peso 20%)",
+                "RSI neutral (51.4)",
+                "MACD negativo",
+                "Precio dentro de las bandas de Bollinger",
+                "Volumen fuerte (2.1x)",
+                "Stochastic neutral",
+                "Momentum negativo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR alto (72.23), buena volatilidad para movimiento",
+                "CCI neutral (0.0)",
+                "Tendencia alcista en largo plazo"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "LARGO"
+        },
+        {
+            "orden_recomendado": 12,
+            "ticker": "BABA",
+            "score": 19.5,
+            "precio_actual": 119.38,
+            "tendencias": {
+                "corta": "BAJISTA",
+                "media": "BAJISTA",
+                "larga": "ALCISTA"
+            },
+            "rsi": 47.98,
+            "acciones_recomendadas": 83,
+            "inversion_total": 9908.54,
+            "potencial_ganancia": 990.85,
+            "razones": [
+                "Fuerza de tendencia: 1/3 timeframes alcistas (peso 20%)",
+                "RSI neutral (48.0)",
+                "MACD negativo",
+                "Precio dentro de las bandas de Bollinger",
+                "Volumen débil (0.7x)",
+                "Stochastic neutral",
+                "Momentum negativo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR alto (3.53), buena volatilidad para movimiento",
+                "CCI neutral (0.0)",
+                "Tendencia alcista en largo plazo"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "LARGO"
+        },
+        {
+            "orden_recomendado": 13,
+            "ticker": "AAPL",
+            "score": 16.5,
+            "precio_actual": 203.92,
+            "tendencias": {
+                "corta": "BAJISTA",
+                "media": "ALCISTA",
+                "larga": "BAJISTA"
+            },
+            "rsi": 50.5,
+            "acciones_recomendadas": 49,
+            "inversion_total": 9992.08,
+            "potencial_ganancia": 999.21,
+            "razones": [
+                "Fuerza de tendencia: 1/3 timeframes alcistas (peso 20%)",
+                "RSI neutral (50.5)",
+                "MACD positivo",
+                "Precio dentro de las bandas de Bollinger",
+                "Volumen débil (0.9x)",
+                "Stochastic neutral",
+                "Momentum positivo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR alto (5.27), buena volatilidad para movimiento",
+                "CCI neutral (0.0)"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "MEDIO"
+        },
+        {
+            "orden_recomendado": 14,
+            "ticker": "LLY",
+            "score": 16.0,
+            "precio_actual": 769.88,
+            "tendencias": {
+                "corta": "ALCISTA",
+                "media": "BAJISTA",
+                "larga": "BAJISTA"
+            },
+            "rsi": 53.48,
+            "acciones_recomendadas": 12,
+            "inversion_total": 9238.56,
+            "potencial_ganancia": 923.86,
+            "razones": [
+                "Fuerza de tendencia: 1/3 timeframes alcistas (peso 20%)",
+                "RSI neutral (53.5)",
+                "MACD positivo",
+                "Precio dentro de las bandas de Bollinger",
+                "Volumen débil (0.5x)",
+                "Stochastic en sobrecompra",
+                "Momentum positivo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR alto (22.78), buena volatilidad para movimiento",
+                "CCI neutral (0.0)"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "CORTO"
+        },
+        {
+            "orden_recomendado": 15,
+            "ticker": "TSLA",
+            "score": 15.0,
+            "precio_actual": 295.14,
+            "tendencias": {
+                "corta": "BAJISTA",
+                "media": "ALCISTA",
+                "larga": "BAJISTA"
+            },
+            "rsi": 41.72,
+            "acciones_recomendadas": 33,
+            "inversion_total": 9739.62,
+            "potencial_ganancia": 973.96,
+            "razones": [
+                "Fuerza de tendencia: 1/3 timeframes alcistas (peso 20%)",
+                "RSI neutral (41.7)",
+                "MACD negativo",
+                "Precio dentro de las bandas de Bollinger",
+                "Volumen moderado (1.4x)",
+                "Stochastic neutral",
+                "Momentum negativo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR alto (19.11), buena volatilidad para movimiento",
+                "CCI neutral (0.0)"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "MEDIO"
+        },
+        {
+            "orden_recomendado": 16,
+            "ticker": "NU",
+            "score": 14.5,
+            "precio_actual": 12.15,
+            "tendencias": {
+                "corta": "BAJISTA",
+                "media": "ALCISTA",
+                "larga": "BAJISTA"
+            },
+            "rsi": 49.85,
+            "acciones_recomendadas": 823,
+            "inversion_total": 9999.45,
+            "potencial_ganancia": 999.94,
+            "razones": [
+                "Fuerza de tendencia: 1/3 timeframes alcistas (peso 20%)",
+                "RSI neutral (49.9)",
+                "MACD negativo",
+                "Precio dentro de las bandas de Bollinger",
+                "Volumen débil (0.7x)",
+                "Stochastic neutral",
+                "Momentum negativo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR alto (0.42), buena volatilidad para movimiento",
+                "CCI neutral (0.0)"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "MEDIO"
+        },
+        {
+            "orden_recomendado": 17,
+            "ticker": "NIO",
+            "score": 6.5,
+            "precio_actual": 3.63,
+            "tendencias": {
+                "corta": "BAJISTA",
+                "media": "BAJISTA",
+                "larga": "BAJISTA"
+            },
+            "rsi": 42.49,
+            "acciones_recomendadas": 2754,
+            "inversion_total": 9997.02,
+            "potencial_ganancia": 999.7,
+            "razones": [
+                "Fuerza de tendencia: 0/3 timeframes alcistas (peso 20%)",
+                "RSI neutral (42.5)",
+                "MACD negativo",
+                "Precio dentro de las bandas de Bollinger",
+                "Volumen débil (0.9x)",
+                "Stochastic neutral",
+                "Momentum negativo",
+                "Precio lejos de soportes y resistencias clave",
+                "ADX débil (0.0), tendencia débil o ausente",
+                "ATR alto (0.18), buena volatilidad para movimiento",
+                "CCI neutral (0.0)"
+            ],
+            "riesgo": "ALTO",
+            "tiempo_recomendado_hold": "CORTO"
+        }
+    ]
+}

@@ -1,0 +1,59 @@
+{
+    "fecha_generacion": "2025-05-21 16:52:47",
+    "analisis": [
+        {
+            "ticker": "PLTR",
+            "score": 50,
+            "probabilidad": "MEDIA",
+            "razones": [
+                "Tendencia negativa de earnings",
+                "Baja tasa de superación de expectativas",
+                "Fuerte crecimiento de ingresos (39.3%)",
+                "Margen de beneficio moderado (18.3%)",
+                "Alta volatilidad en earnings"
+            ],
+            "metricas": {
+                "earnings_actuales": -520379000.0,
+                "earnings_anteriores": -373705000.0,
+                "cambio_earnings": -39.24860518323277,
+                "tendencia_earnings": -353123700.00000006,
+                "volatilidad_earnings": 467535095.72392887,
+                "tasa_superacion": null
+            },
+            "recomendacion_corto_plazo": "Alto riesgo, operar solo si tienes experiencia en trading de volatilidad.",
+            "explicacion_corto_plazo": "La situación es incierta o muy volátil. Mejor evitar operar salvo que busques riesgo. Ojo: la volatilidad de los earnings es muy alta, el movimiento puede ser brusco.",
+            "resumen_reaccion_ultimos_earnings": [
+                {
+                    "fecha": "2023-12-31",
+                    "precio_antes": 17.170000076293945,
+                    "precio_despues": 16.579999923706055,
+                    "variacion_pct": -3.4362268489589844,
+                    "reaccion": "BAJA"
+                },
+                {
+                    "fecha": "2022-12-31",
+                    "precio_antes": 6.420000076293945,
+                    "precio_despues": 6.389999866485596,
+                    "variacion_pct": -0.4672929821157844,
+                    "reaccion": "BAJA"
+                },
+                {
+                    "fecha": "2021-12-31",
+                    "precio_antes": 18.690000534057617,
+                    "precio_despues": 18.209999084472656,
+                    "variacion_pct": -2.5682259811083705,
+                    "reaccion": "BAJA"
+                },
+                {
+                    "fecha": "2020-12-31",
+                    "precio_antes": 25.100000381469727,
+                    "precio_despues": 23.549999237060547,
+                    "variacion_pct": -6.175303270327757,
+                    "reaccion": "BAJA"
+                }
+            ],
+            "fecha_proximo_earning": "[datetime.date(2025, 8, 4), datetime.date(2025, 8, 8)]",
+            "valor_esperado": 0.13837
+        }
+    ]
+}
