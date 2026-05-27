@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#f3ecdf" />
+    <title>Market Bot Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Market Bot / Unified Analyzer</p>
+          <h1>Una sola pantalla para decidir si comprar, vender, mantener o evitar.</h1>
+          <p class="hero-text">
+            El veredicto combina reglas determinísticas, escenarios probabilísticos
+            y una política de acción que distingue corto y largo plazo.
+          </p>
+
+          <form class="analysis-form" id="analysis-form">
+            <label class="field">
+              <span class="field-label">Ticker</span>
+              <input
+                id="ticker-input"
+                name="ticker"
+                type="text"
+                placeholder="AAPL, NVDA, YPF, MELI"
+                autocomplete="off"
+                autocapitalize="characters"
+                enterkeyhint="search"
+                list="ticker-suggestions"
+                spellcheck="false"
+              />
+            </label>
+
+            <div class="horizon-group" role="radiogroup" aria-label="Horizonte">
+              <button type="button" class="horizon-pill is-selected" data-horizon="short">
+                Corto plazo
+              </button>
+              <button type="button" class="horizon-pill" data-horizon="long">
+                Largo plazo
+              </button>
+            </div>
+
+            <button type="submit" class="primary-button" id="analyze-button">
+              <span class="button-label">Analizar setup</span>
+              <span class="button-spinner" aria-hidden="true"></span>
+            </button>
+          </form>
+
+          <p class="mobile-hint">
+            Desde el celular levantá FastAPI con acceso de red y abrí esta misma ruta `/app/` para mantener el mismo origen.
+          </p>
+
+          <p class="status-line" id="analysis-status" aria-live="polite">
+            Listo para analizar un activo.
+          </p>
+        </div>
+
+        <aside class="hero-sidebar">
+          <div class="sidebar-card auth-card">
+            <div class="panel-header compact-header">
+              <div>
+                <p class="sidebar-kicker">Tu espacio</p>
+                <h2 id="auth-title">Ingresá para guardar perfil y portfolio</h2>
+              </div>
+              <div class="mode-group" role="tablist" aria-label="Modo de acceso">
+                <button type="button" class="mode-pill is-selected" data-auth-mode="login">Login</button>
+                <button type="button" class="mode-pill" data-auth-mode="register">Registro</button>
+              </div>
+            </div>
+
+            <form class="auth-form" id="auth-form">
+              <label class="field">
+                <span class="field-label">Username</span>
+                <input id="auth-username" name="username" type="text" autocomplete="username" />
+              </label>
+
+              <label class="field auth-register-only is-hidden" id="auth-display-name-wrap">
+                <span class="field-label">Display name</span>
+                <input id="auth-display-name" name="displayName" type="text" autocomplete="nickname" />
+              </label>
+
+              <label class="field">
+                <span class="field-label">Password</span>
+                <input id="auth-password" name="password" type="password" autocomplete="current-password" />
+              </label>
+
+              <button type="submit" class="primary-button auth-submit" id="auth-submit">
+                <span class="button-label">Ingresar</span>
+                <span class="button-spinner" aria-hidden="true"></span>
+              </button>
+            </form>
+
+            <div class="profile-shell is-hidden" id="profile-shell">
+              <div class="profile-summary">
+                <div>
+                  <p class="sidebar-kicker">Perfil inversor</p>
+                  <h3 id="profile-username">-</h3>
+                </div>
+                <button type="button" class="ghost-button" id="logout-button">Salir</button>
+              </div>
+
+              <form class="profile-form" id="profile-form">
+                <label class="field span-2">
+                  <span class="field-label">Nombre visible</span>
+                  <input id="profile-display-name" name="displayName" type="text" />
+                </label>
+
+                <label class="field">
+                  <span class="field-label">Perfil</span>
+                  <select id="profile-investor-profile" name="investorProfile">
+                    <option value="conservative">Conservador</option>
+                    <option value="moderate">Moderado</option>
+                    <option value="aggressive">Agresivo</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span class="field-label">Horizonte</span>
+                  <select id="profile-preferred-horizon" name="preferredHorizon">
+                    <option value="mixed">Mixto</option>
+                    <option value="short">Corto</option>
+                    <option value="long">Largo</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span class="field-label">Instrumentos</span>
+                  <select id="profile-preferred-instruments" name="preferredInstruments">
+                    <option value="both">Ambos</option>
+                    <option value="cedear">CEDEAR</option>
+                    <option value="stock">Stocks</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span class="field-label">Riesgo</span>
+                  <select id="profile-risk-tolerance" name="riskTolerance">
+                    <option value="low">Bajo</option>
+                    <option value="medium">Medio</option>
+                    <option value="high">Alto</option>
+                  </select>
+                </label>
+
+                <label class="field span-2">
+                  <span class="field-label">Benchmark FX</span>
+                  <select id="profile-benchmark-preference" name="benchmarkPreference">
+                    <option value="official">Oficial</option>
+                    <option value="mep">MEP</option>
+                    <option value="ccl">CCL</option>
+                  </select>
+                </label>
+
+                <button type="submit" class="primary-button">
+                  <span class="button-label">Guardar perfil</span>
+                </button>
+              </form>
+            </div>
+
+            <p class="status-line" id="auth-status" aria-live="polite">Podés entrar o registrarte sin mail.</p>
+          </div>
+
+          <div class="sidebar-card quick-card">
+            <p class="sidebar-kicker">Portfolio rápido</p>
+            <div class="mini-summary-grid" id="mini-summary-grid">
+              <div class="metric-tile">
+                <span class="metric-label">Estado</span>
+                <span class="metric-value">Bloqueado</span>
+              </div>
+              <div class="metric-tile">
+                <span class="metric-label">Moneda</span>
+                <span class="metric-value">ARS</span>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </header>
+
+      <main class="content-grid">
+        <section class="panel surface-tabs-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Surfaces</p>
+              <h2>Workspace, learning y futuro trading</h2>
+            </div>
+            <p class="panel-caption">Cambiá de vista sin salir del flujo principal.</p>
+          </div>
+          <div class="surface-tabs" role="tablist" aria-label="Superficies del producto">
+            <button type="button" class="surface-tab is-selected" data-surface="workspace">Workspace</button>
+            <button type="button" class="surface-tab" data-surface="learning">Learning</button>
+            <button type="button" class="surface-tab" data-surface="trading">Trading / Wallbit</button>
+          </div>
+        </section>
+
+        <div class="surface-stack" id="surface-workspace">
+          <section class="panel portfolio-panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Portfolio</p>
+                <h2>Tus posiciones y ganancia real</h2>
+              </div>
+              <p class="panel-caption">Carga manual en v1. CEDEAR y benchmarks ARG integrados.</p>
+            </div>
+
+            <div class="empty-state" id="portfolio-locked-state">
+              <strong>Ingresá para ver tu workspace de posiciones.</strong>
+              <p>Cuando tengas sesión activa vas a poder cargar CEDEARs o stocks, ver P&amp;L en ARS/USD y comparar contra inflación, MEP, CCL y plazo fijo.</p>
+            </div>
+
+            <div class="portfolio-shell is-hidden" id="portfolio-shell">
+              <form class="portfolio-form" id="portfolio-form">
+                <div class="mode-group" role="tablist" aria-label="Tipo de instrumento">
+                  <button type="button" class="mode-pill is-selected" data-instrument-type="cedear">CEDEAR</button>
+                  <button type="button" class="mode-pill" data-instrument-type="stock">Stock</button>
+                </div>
+
+                <label class="field">
+                  <span class="field-label">Ticker</span>
+                  <input id="position-symbol" name="symbol" type="text" placeholder="AAPL, TSLA, MELI" />
+                </label>
+
+                <label class="field">
+                  <span class="field-label">Cantidad</span>
+                  <input id="position-quantity" name="quantity" type="number" min="0.0001" step="0.0001" />
+                </label>
+
+                <label class="field">
+                  <span class="field-label">Fecha compra</span>
+                  <input id="position-purchase-date" name="purchaseDate" type="date" />
+                </label>
+
+                <label class="field">
+                  <span class="field-label">Precio compra</span>
+                  <input id="position-purchase-price" name="purchasePrice" type="number" min="0.01" step="0.01" />
+                </label>
+
+                <label class="field">
+                  <span class="field-label">Moneda compra</span>
+                  <select id="position-purchase-currency" name="purchaseCurrency">
+                    <option value="ARS">ARS</option>
+                    <option value="USD">USD</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span class="field-label">Underlying opcional</span>
+                  <input id="position-underlying" name="underlyingTicker" type="text" placeholder="Auto si coincide" />
+                </label>
+
+                <label class="field">
+                  <span class="field-label">Ratio CEDEAR opcional</span>
+                  <input id="position-ratio" name="cedearRatio" type="number" min="0.01" step="0.01" placeholder="Auto si vacío" />
+                </label>
+
+                <label class="field span-2">
+                  <span class="field-label">Notas</span>
+                  <textarea id="position-notes" name="notes" rows="2" placeholder="Tesis, broker, comentario"></textarea>
+                </label>
+
+                <button type="submit" class="primary-button">
+                  <span class="button-label">Agregar posición</span>
+                  <span class="button-spinner" aria-hidden="true"></span>
+                </button>
+              </form>
+
+              <p class="status-line" id="portfolio-status" aria-live="polite">Listo para cargar posiciones.</p>
+
+              <div class="summary-grid" id="portfolio-summary-grid"></div>
+              <div class="holdings-grid" id="holdings-grid"></div>
+            </div>
+          </section>
+
+          <section class="panel radar-panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Landing / Top acciones</p>
+                <h2>Oportunidades para ir a buscar</h2>
+              </div>
+              <p class="panel-caption">Clic para cargar un ejemplo en el analizador.</p>
+            </div>
+            <div class="radar-grid" id="radar-grid"></div>
+          </section>
+
+          <section class="panel verdict-panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Workspace</p>
+                <h2 id="workspace-title">Ticker seleccionado: AAPL</h2>
+              </div>
+              <div class="market-chip" id="market-chip">Short horizon</div>
+            </div>
+
+            <div class="concept-ribbon" id="concept-ribbon"></div>
+            <div class="tooltip-preview" id="tooltip-preview" aria-live="polite">Pasá por un concepto para ver una explicación rápida.</div>
+
+            <div class="verdict-grid" id="verdict-grid"></div>
+
+            <div class="analysis-grid">
+              <article class="analysis-card">
+                <p class="analysis-kicker">Motor determinístico</p>
+                <h3 id="deterministic-title">Setup alcista confirmado</h3>
+                <ul class="reason-list" id="deterministic-reasons"></ul>
+              </article>
+
+              <article class="analysis-card">
+                <p class="analysis-kicker">Motor probabilístico</p>
+                <h3 id="probabilistic-title">Distribución de escenarios</h3>
+                <div class="scenario-stack" id="scenario-stack"></div>
+                <ul class="warning-list" id="probabilistic-warnings"></ul>
+              </article>
+
+              <article class="analysis-card wide-card">
+                <p class="analysis-kicker">Política de acción</p>
+                <div class="action-matrix" id="action-matrix"></div>
+              </article>
+
+              <article class="analysis-card">
+                <p class="analysis-kicker">Validación temporal</p>
+                <h3 id="validation-title">Modelo sin validar todavía</h3>
+                <div class="metric-grid" id="validation-grid"></div>
+              </article>
+
+              <article class="analysis-card">
+                <p class="analysis-kicker">Backtest base</p>
+                <h3 id="backtest-title">Sin backtest</h3>
+                <div class="metric-grid" id="backtest-grid"></div>
+              </article>
+
+              <article class="analysis-card wide-card">
+                <p class="analysis-kicker">Catalysts & guardrails</p>
+                <div class="notes-grid">
+                  <div>
+                    <h3>Catalysts</h3>
+                    <ul class="reason-list" id="catalyst-list"></ul>
+                  </div>
+                  <div>
+                    <h3>Guardrails</h3>
+                    <ul class="reason-list" id="guardrail-list"></ul>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </section>
+        </div>
+
+        <div class="surface-stack is-hidden" id="surface-learning">
+          <section class="panel learning-panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Learning / Dictionary</p>
+                <h2>Conceptos para entender qué estás mirando</h2>
+              </div>
+              <p class="panel-caption">Hover o focus para explicación corta. La ficha te deja el contexto completo.</p>
+            </div>
+            <div class="learning-grid" id="learning-grid"></div>
+          </section>
+        </div>
+
+        <div class="surface-stack is-hidden" id="surface-trading">
+          <section class="panel trading-panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Trading / Wallbit</p>
+                <h2>Placeholder para conectar Wallbit API</h2>
+              </div>
+              <span class="tone-chip">Future path</span>
+            </div>
+
+            <div class="empty-state trading-state">
+              <strong>Esta superficie todavía no ejecuta órdenes.</strong>
+              <p>La idea es usarla cuando el producto pase de análisis a trading asistido. Va a vivir separada del workspace para no mezclar investigación con ejecución.</p>
+            </div>
+
+            <div class="trading-roadmap">
+              <article class="analysis-card">
+                <p class="analysis-kicker">Wallbit API</p>
+                <h3>Conexión futura</h3>
+                <ul class="reason-list">
+                  <li>Guardar credenciales de forma segura fuera del cliente.</li>
+                  <li>Traer balances, buying power y posiciones en tiempo real.</li>
+                  <li>Agregar sandbox o paper trading antes de habilitar órdenes reales.</li>
+                </ul>
+              </article>
+
+              <article class="analysis-card">
+                <p class="analysis-kicker">Guardrails</p>
+                <h3>Antes de tocar dinero real</h3>
+                <ul class="reason-list">
+                  <li>Separar análisis, confirmación y ejecución.</li>
+                  <li>Agregar límites por perfil inversor y exposure por activo.</li>
+                  <li>Auditar cada orden con logs y motivo del disparo.</li>
+                </ul>
+              </article>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <datalist id="ticker-suggestions"></datalist>
+    <script src="./app.js"></script>
+  </body>
+</html>
