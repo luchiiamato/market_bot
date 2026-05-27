@@ -5,9 +5,11 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+TICKER_PATTERN = r"^[A-Za-z0-9.\-]{1,16}$"
+
 
 class AnalyzeRequest(BaseModel):
-    ticker: str = Field(min_length=1, max_length=16)
+    ticker: str = Field(min_length=1, max_length=16, pattern=TICKER_PATTERN)
     horizon: str = Field(default="short", pattern="^(short|long)$")
 
 
@@ -38,12 +40,12 @@ class ProfileUpdateRequest(BaseModel):
 
 class CreatePositionRequest(BaseModel):
     instrument_type: str = Field(pattern="^(cedear|stock)$")
-    symbol: str = Field(min_length=1, max_length=16)
+    symbol: str = Field(min_length=1, max_length=16, pattern=TICKER_PATTERN)
     quantity: float = Field(gt=0)
     purchase_date: date
     purchase_price: float = Field(gt=0)
     purchase_currency: str = Field(pattern="^(ARS|USD)$")
-    underlying_ticker: Optional[str] = Field(default=None, max_length=16)
+    underlying_ticker: Optional[str] = Field(default=None, max_length=16, pattern=TICKER_PATTERN)
     cedear_ratio: Optional[float] = Field(default=None, gt=0)
     notes: str = Field(default="", max_length=500)
 
@@ -66,6 +68,9 @@ class CatalystResponse(BaseModel):
     name: str
     category: str
     impact: str
+    status: str = "inferred"
+    source_url: Optional[str] = None
+    observed_at: Optional[datetime] = None
 
 
 class IndicatorSnapshotResponse(BaseModel):
@@ -157,6 +162,7 @@ class RankingItemResponse(BaseModel):
     price: float
     regime: str
     is_cedear: bool
+    why_for_you: list[str] = Field(default_factory=list)
 
 
 class UniverseItemResponse(BaseModel):
@@ -263,3 +269,65 @@ class PeriodBenchmarkResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     service: str
+
+
+class NewsItemResponse(BaseModel):
+    ticker: str
+    title: str
+    url: Optional[str] = None
+    source: Optional[str] = None
+    summary: Optional[str] = None
+    sentiment: float
+    impact_category: str
+    confidence: float
+    published_at: Optional[str] = None
+    fetched_at: str
+
+
+class EarningsEventResponse(BaseModel):
+    ticker: str
+    report_date: date
+    report_time: Optional[str] = None
+    eps_estimate: Optional[float] = None
+    eps_actual: Optional[float] = None
+    revenue_estimate: Optional[float] = None
+    revenue_actual: Optional[float] = None
+
+
+class BalanzImportSkipResponse(BaseModel):
+    row_number: int
+    ticker: Optional[str] = None
+    reason: str
+
+
+class BalanzImportResponse(BaseModel):
+    source_sheet: str
+    imported_count: int
+    skipped_count: int
+    replace_existing: bool
+    positions_count_after: int
+    imported_symbols: list[str] = Field(default_factory=list)
+    skipped_rows: list[BalanzImportSkipResponse] = Field(default_factory=list)
+
+
+class MarketPulseItemResponse(BaseModel):
+    symbol: str
+    label: str
+    category: str
+    price: float
+    day_change_pct: float
+    relative_to_sma20_pct: Optional[float] = None
+    relative_to_sma50_pct: Optional[float] = None
+    tone: str
+    note: str
+
+
+class MarketOverviewResponse(BaseModel):
+    generated_at: datetime
+    ticker: Optional[str] = None
+    horizon: str
+    regime: str
+    breadth: str
+    summary: str
+    warnings: list[str] = Field(default_factory=list)
+    instruments: list[MarketPulseItemResponse] = Field(default_factory=list)

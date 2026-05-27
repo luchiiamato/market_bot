@@ -33,6 +33,7 @@ class PortfolioService:
         purchase_price: float,
         purchase_currency: str,
         benchmark_preference: str,
+        risk_tolerance: str = "medium",
         underlying_ticker: str | None = None,
         cedear_ratio: float | None = None,
         notes: str = "",
@@ -107,16 +108,30 @@ class PortfolioService:
             )
             position_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
 
-        return self.get_position_valuation(position_id, user_id, benchmark_preference)
+        return self.get_position_valuation(
+            position_id,
+            user_id,
+            benchmark_preference,
+            risk_tolerance=risk_tolerance,
+        )
 
-    def list_positions(self, user_id: int, benchmark_preference: str) -> list[PositionValuation]:
+    def list_positions(
+        self,
+        user_id: int,
+        benchmark_preference: str,
+        risk_tolerance: str = "medium",
+    ) -> list[PositionValuation]:
         with connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM positions WHERE user_id = ? ORDER BY purchase_date DESC, id DESC",
                 (user_id,),
             ).fetchall()
         return [
-            self._build_position_valuation(_record_from_row(row), benchmark_preference)
+            self._build_position_valuation(
+                _record_from_row(row),
+                benchmark_preference,
+                risk_tolerance=risk_tolerance,
+            )
             for row in rows
         ]
 
@@ -125,6 +140,7 @@ class PortfolioService:
         position_id: int,
         user_id: int,
         benchmark_preference: str,
+        risk_tolerance: str = "medium",
     ) -> PositionValuation:
         with connection() as conn:
             row = conn.execute(
@@ -133,7 +149,11 @@ class PortfolioService:
             ).fetchone()
         if row is None:
             raise PortfolioError("Posicion no encontrada.")
-        return self._build_position_valuation(_record_from_row(row), benchmark_preference)
+        return self._build_position_valuation(
+            _record_from_row(row),
+            benchmark_preference,
+            risk_tolerance=risk_tolerance,
+        )
 
     def delete_position(self, position_id: int, user_id: int) -> None:
         with connection() as conn:
@@ -142,8 +162,21 @@ class PortfolioService:
                 (position_id, user_id),
             )
 
-    def portfolio_summary(self, user_id: int, benchmark_preference: str) -> PortfolioSummary:
-        positions = self.list_positions(user_id, benchmark_preference)
+    def clear_positions(self, user_id: int) -> None:
+        with connection() as conn:
+            conn.execute("DELETE FROM positions WHERE user_id = ?", (user_id,))
+
+    def portfolio_summary(
+        self,
+        user_id: int,
+        benchmark_preference: str,
+        risk_tolerance: str = "medium",
+    ) -> PortfolioSummary:
+        positions = self.list_positions(
+            user_id,
+            benchmark_preference,
+            risk_tolerance=risk_tolerance,
+        )
         total_value_ars = sum(item.current_value_ars for item in positions)
         total_value_usd = sum(item.current_value_usd for item in positions)
         total_cost_ars = sum(item.cost_basis_ars for item in positions)
@@ -169,6 +202,7 @@ class PortfolioService:
         self,
         position: PositionRecord,
         benchmark_preference: str,
+        risk_tolerance: str = "medium",
     ) -> PositionValuation:
         today = date.today()
         snapshot = self.benchmark_service.build_period_snapshot(position.purchase_date, today)
@@ -199,6 +233,18 @@ class PortfolioService:
         cost_basis_ars, cost_basis_usd = self._cost_basis(position, snapshot, selected_house)
         comparisons = self._benchmark_comparisons(cost_basis_ars, current_value_ars, snapshot)
         inflation_track = next(item.tracked_value_ars for item in comparisons if item.label == "inflation")
+
+        # Earnings-aware guardrails. Soft-fail: if the reference_data package
+        # is unavailable or yfinance is offline, skip without breaking
+        # valuation.
+        try:
+            from market_reference.earnings import earnings_guardrail_for_holding  # type: ignore
+
+            note = earnings_guardrail_for_holding(position.underlying_ticker, risk_tolerance)
+            if note:
+                notes.append(note)
+        except Exception:
+            pass
 
         return PositionValuation(
             position_id=position.position_id,

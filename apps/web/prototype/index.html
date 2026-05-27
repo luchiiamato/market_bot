@@ -3,16 +3,53 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#f3ecdf" />
-    <title>Market Bot Prototype</title>
+    <meta name="theme-color" content="#07090a" />
+    <meta name="color-scheme" content="dark" />
+    <title>Market Bot · Editorial Terminal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="./styles.css" />
+    <script>
+      // Pre-paint theme resolution to avoid FOUC.
+      (function () {
+        try {
+          var saved = localStorage.getItem("marketBotTheme");
+          var prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+          var theme = saved || (prefersLight ? "light" : "dark");
+          document.documentElement.setAttribute("data-theme", theme);
+        } catch (err) {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div class="page-shell">
+      <div class="masthead">
+        <span class="masthead-mark">
+          <span class="masthead-dot" aria-hidden="true"></span>
+          Market·Bot / Editorial Terminal / v1
+        </span>
+        <div class="theme-switch" role="radiogroup" aria-label="Tema visual">
+          <button type="button" class="theme-pill" data-theme-pick="dark" aria-pressed="true">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+            </svg>
+            <span class="theme-pill-label">Dark</span>
+          </button>
+          <button type="button" class="theme-pill" data-theme-pick="light" aria-pressed="false">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+            </svg>
+            <span class="theme-pill-label">Light</span>
+          </button>
+        </div>
+      </div>
       <header class="hero">
         <div class="hero-copy">
           <p class="eyebrow">Market Bot / Unified Analyzer</p>
-          <h1>Una sola pantalla para decidir si comprar, vender, mantener o evitar.</h1>
+          <h1>Una sola pantalla para <em>decidir</em> si comprar, vender, mantener o evitar.</h1>
           <p class="hero-text">
             El veredicto combina reglas determinísticas, escenarios probabilísticos
             y una política de acción que distingue corto y largo plazo.
@@ -183,12 +220,13 @@
           <div class="panel-header">
             <div>
               <p class="panel-kicker">Surfaces</p>
-              <h2>Workspace, learning y futuro trading</h2>
+              <h2>Workspace, guía, learning y futuro trading</h2>
             </div>
             <p class="panel-caption">Cambiá de vista sin salir del flujo principal.</p>
           </div>
           <div class="surface-tabs" role="tablist" aria-label="Superficies del producto">
             <button type="button" class="surface-tab is-selected" data-surface="workspace">Workspace</button>
+            <button type="button" class="surface-tab" data-surface="howto">How to use</button>
             <button type="button" class="surface-tab" data-surface="learning">Learning</button>
             <button type="button" class="surface-tab" data-surface="trading">Trading / Wallbit</button>
           </div>
@@ -210,6 +248,31 @@
             </div>
 
             <div class="portfolio-shell is-hidden" id="portfolio-shell">
+              <form class="portfolio-import-form" id="portfolio-import-form">
+                <div class="portfolio-import-copy span-2">
+                  <p class="analysis-kicker">Importar desde Balanz</p>
+                  <h3>Leé tu extracto y cargá los lotes abiertos de una vez</h3>
+                  <p>Subí el `.xlsx` exportado por Balanz. En esta v1 se importan sólo CEDEARs y stocks; bonos, dividendos y movimientos no soportados se saltean y quedan reportados.</p>
+                </div>
+
+                <label class="field span-2">
+                  <span class="field-label">Extracto Balanz (.xlsx)</span>
+                  <input id="portfolio-import-file" name="balanzFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                </label>
+
+                <label class="portfolio-import-toggle span-2" for="portfolio-import-replace">
+                  <input id="portfolio-import-replace" name="replaceExisting" type="checkbox" />
+                  <span>Reemplazar mis posiciones actuales con lo que venga en el extracto</span>
+                </label>
+
+                <button type="submit" class="primary-button span-2">
+                  <span class="button-label">Importar extracto</span>
+                  <span class="button-spinner" aria-hidden="true"></span>
+                </button>
+              </form>
+
+              <p class="status-line" id="portfolio-import-status" aria-live="polite">Podés seguir cargando manualmente o importar tu extracto de Balanz.</p>
+
               <form class="portfolio-form" id="portfolio-form">
                 <div class="mode-group" role="tablist" aria-label="Tipo de instrumento">
                   <button type="button" class="mode-pill is-selected" data-instrument-type="cedear">CEDEAR</button>
@@ -272,6 +335,17 @@
             </div>
           </section>
 
+          <section class="panel benchmark-panel is-hidden" id="benchmark-panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Benchmark</p>
+                <h2>Benchmark vs tu portfolio</h2>
+              </div>
+              <p class="panel-caption">Tracked value en ARS por benchmark, ordenado para ver outperformance.</p>
+            </div>
+            <div class="benchmark-bars" id="benchmark-bars"></div>
+          </section>
+
           <section class="panel radar-panel">
             <div class="panel-header">
               <div>
@@ -298,6 +372,19 @@
             <div class="verdict-grid" id="verdict-grid"></div>
 
             <div class="analysis-grid">
+              <article class="analysis-card wide-card">
+                <div class="card-head-inline">
+                  <div>
+                    <p class="analysis-kicker">Market regime</p>
+                    <h3 id="market-overview-title">Cargando tape general</h3>
+                  </div>
+                  <span class="tone-chip" id="market-overview-chip">Sync</span>
+                </div>
+                <p class="panel-caption context-caption" id="market-overview-summary">Índices, volatilidad, cripto, tasas y petróleo para leer si el mercado acompaña o pelea tu tesis.</p>
+                <div class="macro-grid" id="market-overview-grid"></div>
+                <ul class="warning-list" id="market-overview-warnings"></ul>
+              </article>
+
               <article class="analysis-card">
                 <p class="analysis-kicker">Motor determinístico</p>
                 <h3 id="deterministic-title">Setup alcista confirmado</h3>
@@ -328,6 +415,38 @@
                 <div class="metric-grid" id="backtest-grid"></div>
               </article>
 
+              <article class="analysis-card">
+                <div class="card-head-inline">
+                  <div>
+                    <p class="analysis-kicker">News tape</p>
+                    <h3 id="news-title">Cargando contexto externo</h3>
+                  </div>
+                  <span class="tone-chip" id="news-chip">Live feed</span>
+                </div>
+                <p class="panel-caption context-caption">Titulares recientes, sesgo y links para validar catalysts externos.</p>
+                <div class="context-stack" id="news-feed"></div>
+              </article>
+
+              <article class="analysis-card">
+                <div class="card-head-inline">
+                  <div>
+                    <p class="analysis-kicker">Earnings watch</p>
+                    <h3 id="earnings-title">Ventana de eventos</h3>
+                  </div>
+                  <span class="tone-chip" id="earnings-chip">Event risk</span>
+                </div>
+                <div class="earnings-shell">
+                  <div class="earnings-column">
+                    <p class="context-subtitle">Ticker actual</p>
+                    <div class="context-stack" id="ticker-earnings-feed"></div>
+                  </div>
+                  <div class="earnings-column">
+                    <p class="context-subtitle">Portfolio / watchlist</p>
+                    <div class="context-stack" id="portfolio-earnings-feed"></div>
+                  </div>
+                </div>
+              </article>
+
               <article class="analysis-card wide-card">
                 <p class="analysis-kicker">Catalysts & guardrails</p>
                 <div class="notes-grid">
@@ -345,6 +464,107 @@
           </section>
         </div>
 
+        <div class="surface-stack is-hidden" id="surface-howto">
+          <section class="panel howto-panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">How To Use This Tool</p>
+                <h2>Cómo usar el workspace sin perderte entre señales</h2>
+              </div>
+              <span class="tone-chip">Playbook</span>
+            </div>
+
+            <div class="howto-hero">
+              <article class="howto-lead">
+                <p class="analysis-kicker">Flujo recomendado</p>
+                <h3>Primero tesis, después contexto, recién ahí decisión.</h3>
+                <p>La herramienta consolida análisis técnico, probabilidad, noticias, régimen de mercado, earnings y portfolio. No está pensada para saltar directo a “comprar o vender”, sino para ordenar el proceso y bajar errores de lectura.</p>
+                <div class="howto-chips">
+                  <span class="tone-chip">1. Elegí ticker</span>
+                  <span class="tone-chip">2. Definí horizonte</span>
+                  <span class="tone-chip">3. Leé el veredicto</span>
+                  <span class="tone-chip">4. Validá contexto</span>
+                </div>
+              </article>
+
+              <div class="howto-stats">
+                <article class="howto-mini-card">
+                  <p class="analysis-kicker">Workspace</p>
+                  <h3>Qué mirar primero</h3>
+                  <p>Acción sugerida, convicción, régimen y guardrails.</p>
+                </article>
+                <article class="howto-mini-card">
+                  <p class="analysis-kicker">Portfolio</p>
+                  <h3>Qué comparar</h3>
+                  <p>Ganancia real contra inflación, MEP, CCL y plazo fijo.</p>
+                </article>
+              </div>
+            </div>
+
+            <div class="howto-grid">
+              <article class="howto-card">
+                <div class="howto-step">01</div>
+                <h3>Elegí el activo correcto</h3>
+                <p>Usá el buscador para un ticker puntual o arrancá desde la landing con las oportunidades sugeridas. Si el activo tiene CEDEAR, el sistema lo muestra como parte del universo recomendado.</p>
+              </article>
+
+              <article class="howto-card">
+                <div class="howto-step">02</div>
+                <h3>Definí si tu lectura es corta o larga</h3>
+                <p><strong>Short horizon</strong> pesa más momentum, volatilidad y catalysts cercanos. <strong>Long horizon</strong> le da más importancia a estructura, régimen general y presión de tasas.</p>
+              </article>
+
+              <article class="howto-card">
+                <div class="howto-step">03</div>
+                <h3>Leé el veredicto consolidado</h3>
+                <p>Arriba de todo vas a ver acción sugerida, convicción y régimen. Eso es el resumen, no la explicación. Después bajás a los motores para entender por qué el sistema llegó ahí.</p>
+              </article>
+
+              <article class="howto-card">
+                <div class="howto-step">04</div>
+                <h3>Separá reglas de probabilidades</h3>
+                <p>El motor determinístico responde “qué veo en precio y estructura”. El probabilístico responde “qué escenarios son más probables”. Si ambos se contradicen, no fuerces la operación.</p>
+              </article>
+
+              <article class="howto-card">
+                <div class="howto-step">05</div>
+                <h3>Validá contexto externo</h3>
+                <p>Antes de actuar, mirá <strong>Market regime</strong>, <strong>News tape</strong> y <strong>Earnings watch</strong>. Una guerra, una noticia regulatoria o un reporte cercano pueden invalidar un setup técnico limpio.</p>
+              </article>
+
+              <article class="howto-card">
+                <div class="howto-step">06</div>
+                <h3>Recién ahí tomá la decisión</h3>
+                <p>La política de acción te sugiere alternativas como hold, go long, go short o estrategias de opciones. Usala junto con stops, take profit y tamaño de posición, no como botón automático.</p>
+              </article>
+            </div>
+
+            <div class="howto-rail">
+              <article class="howto-detail-card">
+                <p class="analysis-kicker">Cómo interpretar cada bloque</p>
+                <ul class="reason-list">
+                  <li><strong>Market regime:</strong> te dice si el mercado acompaña o pelea tu tesis.</li>
+                  <li><strong>Motor determinístico:</strong> estructura, tendencia, momentum, volumen y niveles.</li>
+                  <li><strong>Motor probabilístico:</strong> escenarios posibles y calibración del modelo.</li>
+                  <li><strong>Catalysts & guardrails:</strong> qué puede acelerar la tesis y qué puede romperla.</li>
+                  <li><strong>Portfolio:</strong> rendimiento real contra benchmarks argentinos.</li>
+                </ul>
+              </article>
+
+              <article class="howto-detail-card">
+                <p class="analysis-kicker">Reglas prácticas</p>
+                <ul class="reason-list">
+                  <li>No operes sólo porque una card esté en verde.</li>
+                  <li>Si hay earnings cerca, asumí gap risk aunque el gráfico se vea prolijo.</li>
+                  <li>Si el régimen general está risk-off, pedí más confirmación.</li>
+                  <li>Si el retorno real pierde contra MEP o inflación, la ganancia nominal engaña.</li>
+                  <li>Si no entendés un término, buscá su categoría abajo en el diccionario.</li>
+                </ul>
+              </article>
+            </div>
+          </section>
+        </div>
+
         <div class="surface-stack is-hidden" id="surface-learning">
           <section class="panel learning-panel">
             <div class="panel-header">
@@ -352,7 +572,43 @@
                 <p class="panel-kicker">Learning / Dictionary</p>
                 <h2>Conceptos para entender qué estás mirando</h2>
               </div>
-              <p class="panel-caption">Hover o focus para explicación corta. La ficha te deja el contexto completo.</p>
+              <p class="panel-caption">Buscá, filtrá por categoría y usá hover o focus para llevar el concepto al preview superior.</p>
+            </div>
+            <div class="learning-toolbar">
+              <div class="learning-toolbar-shell">
+                <label class="learning-search" for="learning-search-input">
+                  <span class="learning-search-label">Buscar concepto</span>
+                  <div class="learning-search-field">
+                    <span class="learning-search-glyph" aria-hidden="true">⌕</span>
+                    <input
+                      id="learning-search-input"
+                      class="learning-search-input"
+                      type="search"
+                      inputmode="search"
+                      autocomplete="off"
+                      placeholder="Ej: P/E, put, short, ATR, slippage"
+                    />
+                    <button
+                      type="button"
+                      class="learning-search-clear is-hidden"
+                      id="learning-search-clear"
+                      aria-label="Limpiar búsqueda"
+                    >
+                      Limpiar
+                    </button>
+                  </div>
+                </label>
+
+                <section class="learning-filter-panel" aria-labelledby="learning-filter-title">
+                  <div class="learning-filter-copy">
+                    <p class="learning-search-label" id="learning-filter-title">Filtro por categoría</p>
+                    <p class="learning-filter-caption">Acotá el diccionario a riesgo, opciones, técnico, macro y más.</p>
+                  </div>
+                  <div class="learning-filters" id="learning-filters" role="group" aria-label="Filtros del diccionario"></div>
+                </section>
+              </div>
+
+              <div class="learning-meta" id="learning-meta">Mostrando todos los conceptos.</div>
             </div>
             <div class="learning-grid" id="learning-grid"></div>
           </section>
@@ -400,6 +656,184 @@
     </div>
 
     <datalist id="ticker-suggestions"></datalist>
+    <script>
+      // Theme switch — syncs aria, persists choice, follows system if unset.
+      (function () {
+        var root = document.documentElement;
+        var pills = Array.prototype.slice.call(document.querySelectorAll("[data-theme-pick]"));
+        var STORAGE_KEY = "marketBotTheme";
+
+        function apply(theme) {
+          root.setAttribute("data-theme", theme);
+          pills.forEach(function (pill) {
+            var on = pill.dataset.themePick === theme;
+            pill.classList.toggle("is-selected", on);
+            pill.setAttribute("aria-pressed", on ? "true" : "false");
+          });
+        }
+
+        apply(root.getAttribute("data-theme") || "dark");
+
+        pills.forEach(function (pill) {
+          pill.addEventListener("click", function () {
+            var next = pill.dataset.themePick;
+            apply(next);
+            try { localStorage.setItem(STORAGE_KEY, next); } catch (err) {}
+          });
+        });
+
+        // If the user never picked a theme, follow system changes.
+        if (window.matchMedia) {
+          var mql = window.matchMedia("(prefers-color-scheme: light)");
+          var listener = function (e) {
+            try {
+              if (localStorage.getItem(STORAGE_KEY)) return;
+            } catch (err) {}
+            apply(e.matches ? "light" : "dark");
+          };
+          if (mql.addEventListener) mql.addEventListener("change", listener);
+          else if (mql.addListener) mql.addListener(listener);
+        }
+      })();
+    </script>
+    <script>
+      // Segmented control sliding indicator + optimistic visual update.
+      // Works for .horizon-group, .mode-group, .surface-tabs, .theme-switch.
+      (function () {
+        if (!("MutationObserver" in window)) return;
+        var GROUPS = ".horizon-group, .mode-group, .surface-tabs, .theme-switch";
+
+        function setupGroup(group) {
+          var indicator = group.querySelector(":scope > .seg-indicator");
+          if (!indicator) {
+            indicator = document.createElement("span");
+            indicator.className = "seg-indicator";
+            indicator.setAttribute("aria-hidden", "true");
+            group.insertBefore(indicator, group.firstChild);
+          }
+
+          function buttons() {
+            var out = [];
+            for (var i = 0; i < group.children.length; i++) {
+              var c = group.children[i];
+              if (c.tagName === "BUTTON") out.push(c);
+            }
+            return out;
+          }
+
+          function getSelected() {
+            var bs = buttons();
+            for (var i = 0; i < bs.length; i++) {
+              if (bs[i].classList.contains("is-selected")) return bs[i];
+            }
+            return bs[0];
+          }
+
+          var movingTimer = 0;
+          function move(animate) {
+            var target = getSelected();
+            if (!target) return;
+            // Skip if hidden — getBoundingClientRect() returns zeros.
+            if (group.offsetParent === null && getComputedStyle(group).position !== "fixed") return;
+            var groupRect = group.getBoundingClientRect();
+            var itemRect = target.getBoundingClientRect();
+            var w = itemRect.width;
+            if (w === 0) return;
+            var x = itemRect.left - groupRect.left;
+
+            if (!animate) {
+              var prevTransition = indicator.style.transition;
+              indicator.style.transition = "none";
+              indicator.style.transform = "translate3d(" + x + "px, 0, 0)";
+              indicator.style.width = w + "px";
+              // Force reflow before restoring transition so the next change animates.
+              void indicator.offsetWidth;
+              indicator.style.transition = prevTransition;
+            } else {
+              indicator.style.transform = "translate3d(" + x + "px, 0, 0)";
+              indicator.style.width = w + "px";
+              indicator.classList.add("is-moving");
+              clearTimeout(movingTimer);
+              movingTimer = setTimeout(function () {
+                indicator.classList.remove("is-moving");
+              }, 340);
+            }
+            group.classList.add("is-segmented-ready");
+          }
+
+          // Initial position without animation.
+          move(false);
+
+          // Optimistic click — flip visual state immediately so the UI feels
+          // responsive even if a downstream async handler fails or stalls.
+          group.addEventListener("click", function (e) {
+            var btn = e.target.closest("button");
+            if (!btn || btn.parentElement !== group) return;
+            var bs = buttons();
+            for (var i = 0; i < bs.length; i++) {
+              var on = bs[i] === btn;
+              bs[i].classList.toggle("is-selected", on);
+              if (bs[i].hasAttribute("aria-checked")) bs[i].setAttribute("aria-checked", on ? "true" : "false");
+              if (bs[i].hasAttribute("aria-selected")) bs[i].setAttribute("aria-selected", on ? "true" : "false");
+              if (bs[i].hasAttribute("aria-pressed")) bs[i].setAttribute("aria-pressed", on ? "true" : "false");
+            }
+            // MutationObserver below will trigger the slide.
+          });
+
+          // Slide whenever a descendant button's class changes (e.g. when app.js
+          // calls its own syncSelection after an API response).
+          var observer = new MutationObserver(function () { move(true); });
+          buttons().forEach(function (b) {
+            observer.observe(b, { attributes: true, attributeFilter: ["class"] });
+          });
+
+          // Recompute when the group becomes visible or resizes.
+          if ("ResizeObserver" in window) {
+            var ro = new ResizeObserver(function () { move(false); });
+            ro.observe(group);
+          }
+
+          return { move: move };
+        }
+
+        function init() {
+          var groups = Array.prototype.slice
+            .call(document.querySelectorAll(GROUPS))
+            .map(setupGroup);
+
+          var raf = 0;
+          window.addEventListener("resize", function () {
+            cancelAnimationFrame(raf);
+            raf = requestAnimationFrame(function () {
+              groups.forEach(function (g) { g.move(false); });
+            });
+          });
+
+          // Web fonts shift label widths once loaded — re-measure.
+          if (document.fonts && document.fonts.ready) {
+            document.fonts.ready.then(function () {
+              groups.forEach(function (g) { g.move(false); });
+            });
+          }
+
+          // Also re-measure when any panel toggles `.is-hidden` (e.g. portfolio
+          // shell unlocks after login and reveals its inner mode-group).
+          var visibilityObserver = new MutationObserver(function () {
+            groups.forEach(function (g) { g.move(false); });
+          });
+          document.querySelectorAll(".surface-stack, #portfolio-shell, #profile-shell, #auth-form")
+            .forEach(function (node) {
+              visibilityObserver.observe(node, { attributes: true, attributeFilter: ["class"] });
+            });
+        }
+
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", init);
+        } else {
+          init();
+        }
+      })();
+    </script>
     <script src="./app.js"></script>
   </body>
 </html>

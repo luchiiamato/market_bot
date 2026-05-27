@@ -113,11 +113,35 @@ class ActionSuggestion:
     blockers: list[str] = field(default_factory=list)
 
 
+class CatalystStatus(str, Enum):
+    """Confidence tier for a catalyst.
+
+    - ``confirmed``: official source (company filing, earnings release, regulatory).
+    - ``reported``: credible third-party reporting (mainstream financial press).
+    - ``rumored``: chatter, leaks, single anonymous source. **Cannot flip a verdict.**
+    - ``inferred``: derived from indicators / context (e.g. earnings calendar entry,
+      sector context). No external source.
+    """
+
+    CONFIRMED = "confirmed"
+    REPORTED = "reported"
+    RUMORED = "rumored"
+    INFERRED = "inferred"
+
+
+# Hard policy: a rumored catalyst may move a scenario probability by no more than
+# this absolute amount. It cannot, by itself, flip the deterministic direction.
+RUMOR_MAX_SCENARIO_DELTA = 0.10
+
+
 @dataclass
 class Catalyst:
     name: str
     category: str
     impact: str
+    status: CatalystStatus = CatalystStatus.INFERRED
+    source_url: str | None = None
+    observed_at: datetime | None = None
 
 
 @dataclass
