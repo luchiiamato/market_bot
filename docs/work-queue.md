@@ -6,16 +6,20 @@
 
 ---
 
-## Status snapshot — 2026-05-27 (post Sprint 3)
+## Status snapshot — 2026-05-28 (post Sprint 3, mid Sprint 4)
 
 - **Foundation (Agents A–G)**: ✅ entregada.
 - **Sprint 1 (catalyst tagging + news + earnings)**: ✅ entregada.
 - **Sprint 2 (personalization workspace)**: ✅ entregada. + Balanz importer + market overview (extras).
 - **Sprint 3 (validation + audit + observability)**: ✅ entregada. Audit log,
   Brier validation, rate limit + JSON logging, tests extendidos. **36/36 tests pasan**.
-- **Sprint 4 (hosting & deploy — Agent M)**: [~] scaffolding técnico listo,
-  deploy real pendiente. Path recomendado: Vercel (front) + Fly.io (back,
-  region GRU) + SQLite con volume.
+- **Sprint 4 (hosting & deploy — Agent M)**: [~] scaffolding técnico listo
+  (`Dockerfile`, `fly.toml`, `vercel.json`, `build.js` con `MARKET_BOT_API_BASE`).
+  Ahora corre local; deploy real Vercel+Fly aún sin hacer.
+- **Sprint 5 (polish + numbers audit)**: [ ] NUEVO. Reportes del user contra
+  el host local: (a) transición tema claro/oscuro se siente lenta en el botón,
+  (b) "las cuentas por detrás no parecen tener sentido" — pendiente acotar
+  qué número exactamente. Ver sección 4.6.
 - **Definition of Done v1**: 100% cumplida.
 - **Deferred (post-DoD)**: Agent K (social sentiment), Agent L (Wallbit/trading).
 
@@ -296,6 +300,412 @@ en cuentas nuevas y no asumir "sin cold start" si dejás `min_machines_running =
 **DoD**
 - Link compartible. Onboarding ≤ 5 min para alguien sin contexto.
 
+## 4.6 · NEW SPRINT — Sprint 5 · Polish + numbers audit
+
+> Goal: tras tener la app corriendo local, el user reporta dos problemas
+> distintos. Este sprint los enmarca para no perderlos. Tasks chicas.
+
+### 5.1 · Theme switch perf — agilizar transición dark↔light en el pill `[x]`
+
+**Problema reportado**: "Las transiciones de claro a oscuro en el botón se ven muy lentas."
+
+**Diagnóstico**
+- `.theme-pill` transiciona `color` y `background` con `--motion-base` (280ms).
+  Para un toggle binario debería estar en `--motion-fast` (140ms) o menos.
+- `seg-indicator` del switch ya está overrideado a 110ms (snappy).
+- `--motion-theme = 180ms` está OK por duración, pero se dispara en docenas
+  de superficies a la vez (hairlines, cards, tiles, panels). La cascada
+  amplifica la sensación de lentitud aunque cada propiedad sea breve.
+
+**Files**
+- `apps/web/prototype/styles.css` — `.theme-pill` block (~líneas 359-378):
+  cambiar `transition` de `--motion-base` a `--motion-fast` para `color` y `background`.
+- Considerar reducir `--motion-theme` a ~140ms.
+- Auditar surfaces que transicionan `background var(--motion-theme)` en cascada
+  y limitar a las que realmente cambian color por theme (las que cambian solo
+  por hover/state no necesitan estar en la transición de tema).
+
+**DoD**
+- Click en el pill se siente instantáneo (≤150ms percibido) sin perder el cross-fade.
+- `prefers-reduced-motion: reduce` sigue desactivando la transición.
+- Sin layout shift al togglear.
+
+> ✅ DONE 2026-05-28 por Claude. `apps/web/prototype/styles.css` — `.theme-pill`
+> ahora transiciona `color` y `background` con `--motion-fast` (140ms) en lugar
+> de `--motion-base` (280ms). El cross-fade del `.seg-indicator` ya estaba en
+> 110ms. Sin cambios estructurales, sin layout shift, `prefers-reduced-motion`
+> sigue cubierto por la regla global del prototype.
+
+### 5.2 · ARS↔USD valuation mismatch (CEDEAR ratio fallback bug) `[x]`
+
+**Reporte del user**: "Me dice que 900.000 ARS son 36.000 USD." Implied FX = 25 ARS/USD.
+Eso no matchea ni el oficial, ni MEP ni CCL en 2026. Es síntoma de uno de estos bugs:
+
+**Hipótesis ordenadas por probabilidad**
+
+1. **CEDEAR con ratio fallback = 1** (más probable). `packages/portfolio/.../service.py:218-219`:
+   ```python
+   cedear_ratio = position.cedear_ratio or 1.0
+   current_value_usd = (position.quantity / cedear_ratio) * underlying_price_usd
+   ```
+   Cuando `resolve_cedear_reference` no logra inferir el ratio (yfinance offline,
+   o BYMA price wonky), `cedears.py:78-84` retorna `cedear_ratio=1.0` con
+   `ratio_source="fallback_default"`. Ese fallback a 1.0 infla USD por el ratio real
+   (ej. GOOGL ratio=58 → USD overstated 58x). Implied FX = CCL/ratio_real ≈ 25 para
+   tickers con ratio ~50. **Coincide con el 25 reportado.**
+
+2. **Posición `instrument_type='stock'` con FX official mal cacheado** desde argentinadatos.com.
+   `current_value_ars = USD × current_fx`. Si la API devolvió un valor stale/wrong para
+   el "oficial" (campo `venta` vacío → cae a `compra` → 0 → ... raro pero posible
+   según `benchmarks.py:69`), podría ocurrir. Menos probable que (1).
+
+3. **yfinance devolviendo precio en USD para `.BA` (BYMA)** en vez de ARS.
+   `_latest_close(byma_symbol)` no valida la moneda devuelta. Si el ticker `.BA` no
+   tradea más o yfinance reporta el ADR USD, `local_price_ars` queda en magnitud USD.
+
+**Files a tocar**
+
+- `packages/portfolio/src/market_portfolio/cedears.py` — agregar tabla canónica
+  `CANONICAL_CEDEAR_RATIOS` con los ratios reales de BYMA para los ~40 tickers
+  del `CEDEAR_UNIVERSE`. Usarla como prioridad #2 (después de `user_supplied`,
+  antes de `estimated_market_parity`).
+- `packages/portfolio/src/market_portfolio/service.py` —
+  - En `_build_position_valuation`, si `cedear_ratio_source == "fallback_default"`,
+    rechazar la valuación con error explicativo en vez de devolver números rotos.
+  - Loggear `{symbol, ratio, ratio_source, local_price_ars, underlying_price_usd,
+    implied_fx, ccl}` en `logging_config`. Que sea visible en `fly logs`.
+  - Agregar sanity check: si `abs(implied_fx - ccl) / ccl > 0.30`, marcar la
+    valuación con warning visible al user.
+- `apps/web/prototype/app.js` (`renderPortfolioSummary`) — mostrar el FX implícito
+  por posición y el FX usado a nivel portfolio. Tile "FX usado: CCL 1200" arriba
+  del grid. Que sea imposible que el bug se esconda.
+- `services/api/app.py` — endpoint `GET /portfolio/diagnostics` que devuelva los
+  valores crudos (FX series snapshot, ratios resueltos, last quote per ticker)
+  para que se pueda inspeccionar sin pegarse al DB.
+
+**DoD**
+
+- Reproducción del bug con un test que use un CEDEAR con ratio real ≠ 1 y
+  fuerce `fallback_default` → confirma que hoy explota; con el fix queda sano.
+- En la UI, una tile o tooltip muestra el FX usado para la conversión ARS↔USD.
+- Si `ratio_source` es `fallback_default`, el front muestra warning rojo "ratio
+  no inferido" en la holding card.
+- User confirma sobre su portfolio real que las cuentas cierran.
+
+**Diagnóstico pendiente (info del user)**
+- ✅ Recibido: screenshot + extracto Balanz. 35 posiciones, 2 USD positions perdidas en
+  parsing por el bug de tilde (separado en 5.2b). Implied FX en VALOR = 366 (cost basis
+  USD ~11k correcto, VALOR_USD 47.9k inflado). Root cause: la fórmula
+  `(qty/ratio) × underlying_usd` se desbarata cuando el ratio inferido es impreciso o
+  cuando el ratio queda en 1.0 por fallback.
+
+> ✅ DONE 2026-05-28 por Claude. `packages/portfolio/.../service.py:_build_position_valuation`:
+> el USD de CEDEAR ahora se calcula como `current_value_ars / current_ccl` (conversión
+> directa al CCL, robusta contra ratios mal inferidos). El cálculo
+> `(qty/ratio) × underlying_usd` se mantiene solo como último fallback si CCL no
+> está disponible. Test de regresión: `test_cedear_current_value_usd_uses_ccl_conversion_not_inferred_ratio`
+> reproduce el caso "ratio=1 fallback + 109 GOOGL @ 8485 ARS" y confirma que ahora
+> da ~770 USD en vez de 19,620 USD. **El user NO necesita re-importar** — el fix
+> aplica en read-time, basta con refrescar el portfolio.
+
+### 5.2b · Balanz importer pierde filas "Dólares" por tilde `[x]`
+
+**Diagnóstico**: `_normalize_currency` en `balanz.py` hacía `raw = str(value).lower()`
+y después `"dolar" in raw`. Como `"dólares".lower()` mantiene la tilde, el substring
+match fallaba y las posiciones USD legítimas iban a `skipped[]`. En el extracto del
+user esto perdió silenciosamente 1 META (6 shares) y 1 NVDA (33 shares).
+
+> ✅ DONE 2026-05-28 por Claude. `_normalize_currency` ahora normaliza NFKD y
+> remueve diacríticos antes del match. Agregados los alias `"$"`, `"us$"`, `"u$s"`.
+> Test de regresión: `test_balanz_currency_normalizer_handles_accented_dolares`.
+> Re-parseo del extracto del user: 35 → 37 posiciones (META 6 sh @ $28.20 y
+> NVDA 33 sh @ $9.37 recuperadas). El user debe re-importar con
+> `replace_existing=true` para que aparezcan en su portfolio actual.
+
+### 5.3 · Ranking suggestions son aburridas — expandir universo + catalyst-aware `[x]`
+
+**Reporte del user**: "Los stocks que me sugiere son super básicos. Hoy se explotó
+Snowflake en el pre-market por las ganancias y no lo sugirió. Quiero que sugiera
+stocks raras, cosas que sean oportunidades."
+
+**Diagnóstico**
+
+`packages/engine/src/market_bot/config.py`:
+- `CEDEAR_UNIVERSE` (líneas 21-60): 37 tickers, **incluye SNOW**.
+- `SUGGESTION_UNIVERSE` (líneas 75-90): **solo 14 tickers** (AAPL, AMZN, GGAL, GOOGL,
+  JPM, MELI, META, MSFT, NVDA, PLTR, QQQ, SPY, TSLA, YPF). **NO incluye SNOW**,
+  ni COIN, ni PAM, ni VIST, ni SHOP, ni UBER, ni AMD, ni LLY, ni TSM, ni MCD,
+  ni KO, ni DIS, ni ABBV, ni BABA, ni BAC, ni IBB, ni INTC, ni VALE, ni WMT,
+  ni XOM, ni SPOT, ni ABEV, ni BRK.B.
+- `service.py:117`: `default_universe = SUGGESTION_UNIVERSE if cedear_only else DEFAULT_UNIVERSE`.
+  El ranking por default usa esa lista chica → la sugerencia siempre es el mismo
+  pool de mega-caps obvios.
+
+**Plan**
+
+1. **Quick fix** ✅ DONE: en `config.py`, ahora `SUGGESTION_UNIVERSE = list(CEDEAR_UNIVERSE)`.
+   Que el ranking decida qué subir y qué bajar, no la lista.
+2. **Expandir `CEDEAR_UNIVERSE`** ✅ DONE: pasó de 37 a 57 tickers. Incluye SNOW (ya estaba),
+   y se sumaron AVGO, ARM, MU, QCOM, CRWD, DDOG, NET, MDB, ZS, OKTA, CRM, ORCL, ADBE,
+   PYPL, SQ, ABNB, BIDU, JD, PDD, NU, ALAB, LLY, UNH. **El portfolio del user ya tenía
+   ALAB, NU y UNH y antes no entraban al ranking** — ahora sí.
+3. **Earnings-aware ranking boost** ✅ DONE: `adjust_rank_for_catalysts` en `policy.py`
+   suma multiplicadores cuando hay (a) earnings CONFIRMED, (b) news REPORTED ≤48h,
+   (c) volatilidad alta con dirección definida, (d) volumen ≥2x. Cap a 1.65x para
+   que un solo catalyst no domine. Las razones del bump entran al `why_for_you[]` de
+   la response del ranking, así el user ve *por qué* saltó (no solo *que saltó*).
+4. **"Opportunities" mode** ✅ DONE: `/rankings?mode=opportunities` aplica filtro duro
+   `is_opportunity_candidate` — solo nombres con catalyst, volumen spike, ATR/price > 4%
+   o conviction ≥0.7 con dirección. Adicionalmente, dropea index ETFs (SPY/QQQ/IBB/DIA/VOO/VTI)
+   que no sirven cuando el user pide "movers". Toggle UI en el panel de ranking,
+   estado persiste en `localStorage`. Si el filtro queda vacío, mensaje explicativo.
+
+**Files**
+- `packages/engine/src/market_bot/config.py` — expandir `SUGGESTION_UNIVERSE` y
+  posiblemente `CEDEAR_UNIVERSE`.
+- `packages/engine/src/market_bot/strategies/policy.py` — earnings-aware bump
+  y "opportunities" filter mode.
+- `services/api/schemas.py` + `services/api/app.py` — exponer `mode=opportunities`
+  en `/rankings`.
+- `apps/web/prototype/{index.html, app.js}` — toggle UI "Sugerencias raras" en
+  el panel de ranking.
+- `tests/test_regressions.py` — caso donde SNOW con earnings reciente queda
+  top-5 en mode=opportunities.
+
+**DoD**
+- ✅ `/rankings` con default behavior re-ranquea los 57 tickers de `CEDEAR_UNIVERSE`.
+- ✅ `/rankings?mode=opportunities` prioriza catalysts + volatilidad + volumen.
+- ✅ Tests `test_catalyst_boost_lifts_score_for_fresh_earnings`,
+  `test_opportunity_filter_drops_quiet_megacap_keeps_news_driven_name`,
+  `test_rankings_endpoint_passes_mode_through_to_service` cubren los tres.
+- ✅ UI: toggle "Ranking completo / Solo oportunidades" con persistencia en localStorage.
+
+> ✅ DONE 2026-05-28 por Claude. `policy.py:adjust_rank_for_catalysts` (multiplier
+> stack capped @ 1.65x), `policy.py:is_opportunity_candidate`, integrado en
+> `service.py:rank_universe(mode=...)`, expuesto en `GET /rankings?mode=opportunities`,
+> UI toggle en `apps/web/prototype/{index.html, app.js, styles.css}`. 46/46 tests OK.
+
+### 5.4 · FX diagnostic tile en portfolio `[x]`
+
+**Goal**: que el user pueda ver de un vistazo qué FX se usó para convertir
+ARS↔USD, y si hay drift sospechoso entre el FX implícito (valor ARS ÷ valor USD)
+y el CCL actual.
+
+> ✅ DONE 2026-05-28 por Claude. Tile nuevo arriba del resumen del portfolio:
+> CCL/MEP/Oficial actuales + FX implícito calculado del summary. Si el drift
+> entre implícito y CCL > 25%, el número se pinta `bear` para llamar la atención.
+> Soft-fail si `/benchmarks/current` falla (tile se oculta, no rompe la vista).
+> CSS responsive a 2 columnas en mobile.
+
+### 5.5 · Surface audit de cosas raras en el local host `[ ]`
+
+Recolectar el resto de cosas raras que el user reporte más allá de 5.1/5.2/5.3.
+
+**DoD**
+- Lista en este doc con cada "cosa rara" reportada, file:line donde vive,
+  decisión (fix / wontfix / defer).
+
+---
+
+## 4.7 · NEW SPRINT — Sprint 6 · Future improvements (roadmap)
+
+> Lista de mejoras grandes que se identificaron mientras se cerraba Sprint 5.
+> Cada una ordenada por (impacto al user) × (esfuerzo). El orden de arriba
+> hacia abajo es la prioridad sugerida.
+
+### 6.0 · Typography pass del portfolio summary `[x]`
+
+**Goal**: arreglar la jerarquía visual del summary del portfolio aplicando el
+audit UI/UX (B1 + B5 + B6 + B7). Sin tocar identidad tipográfica (Fraunces +
+DM Sans + JetBrains Mono, paleta citrus, dark/light).
+
+**Cambios**
+
+- `apps/web/prototype/app.js` — nuevo `formatMoney(value, currency, opts)` con
+  prefijos consistentes (`AR$` / `US$`), magnitudes compactas (`M`/`k`),
+  signo explícito opt-in (`+` / `−` tipográfico). `formatPercent` ahora también
+  acepta `{ signed: true }`. Helper `toneOf(value)` para mapear positivo→bull,
+  negativo→bear, cero→neutral.
+- `renderPortfolioSummary` rediseñado: un **hero number** (valor ARS en Fraunces
+  variable, opsz=144 wght=380, clamp(3rem, 6vw, 5.4rem)) + grilla de 4 satellites
+  con bull/bear semantic color y una barra horizontal para "Real vs inflación".
+- CSS `.portfolio-hero-summary`, `.portfolio-hero-value`, `.satellite`,
+  `.real-return-bar` (con divisor central marcando el cero). Responsive a 2 cols
+  a <900px y 1 col a <540px.
+
+> ✅ DONE 2026-05-28 por Claude. La grilla de 6 tiles iguales fue reemplazada
+> por un solo hero number con satélites coloreados según direction. Real Return
+> ahora muestra magnitud visual además del número. 48/48 tests pasan.
+
+### 6.1 · CEDEAR canonical ratio table + Balanz FX read `[~]` (parcial)
+
+**Por qué**: aunque el bug del USD ya está mitigado vía conversión CCL, la
+inferencia de `cedear_ratio` puede seguir devolviendo ratios "snap-fit"
+inexactos (24 cuando es 58, etc.), y el campo "Effective US shares" en cada
+holding card es incorrecto. Además, Balanz exporta el CCL/MEP/Oficial de la
+fecha de compra en columnas K/L/M y los ignoramos — argentinadatos.com puede
+fallar para fechas viejas y cuando falla, falla todo el add_position.
+
+**Plan**
+
+- `packages/portfolio/.../cedears.py` — sumar `CANONICAL_CEDEAR_RATIOS` con
+  ratios verificados contra BYMA (mantener actualizado tras splits).
+- En `resolve_cedear_reference`, prioridad: `user_supplied` → `canonical_table` →
+  `estimated_market_parity` → `fallback_default` (que debería convertirse en
+  warning explícito, no en ratio=1).
+- `packages/portfolio/.../balanz.py` — extender `BalanzPositionDraft` con
+  `purchase_ccl`, `purchase_mep`, `purchase_official` opcionales. Si vienen
+  en el extracto, pasarlos como override al service.
+- `_cost_basis` — si la posición trae `purchase_ccl != None`, usarlo directo
+  en vez de pedírselo a argentinadatos.
+
+**DoD**
+- ✅ `CANONICAL_CEDEAR_RATIOS` con 50+ tickers (mega-caps, semis, AI/cloud,
+  fintech, healthcare, financials, EM, ARGY ADRs). Documentado: actualizar
+  tras splits oficiales de BYMA.
+- ✅ `resolve_cedear_reference` ahora prioriza canonical → parity → fallback.
+- ✅ Card de holding muestra "Equivale a X acciones de TICKER" y chip de
+  source del ratio (Cargado por vos / BYMA oficial / Inferido / No verificado)
+  con color semántico.
+- ⏳ **Pendiente para 6.1b**: leer columnas K/L/M (DolarCCL/MEP/Oficial) del
+  Balanz xlsx y propagarlas como override de FX en `add_position`. Hoy seguimos
+  pidiendo FX a argentinadatos.com para fechas viejas.
+
+> ✅ DONE (parcial) 2026-05-28 por Claude. `CANONICAL_CEDEAR_RATIOS` en
+> `packages/portfolio/.../cedears.py`. `ratio_source="canonical"` agregado al
+> enum. Tests `test_canonical_table_beats_parity_inference`,
+> `test_known_ticker_hits_canonical_even_without_price_legs` + tests existentes
+> renombrados para no chocar. UI: ratio chip + source chip + "Equivale a X
+> acciones" en cada holding card.
+
+### 6.2 · Earnings calendar UI mejorada `[x]`
+
+**Por qué**: ya tenemos `/earnings/upcoming` (auth, holdings-aware) pero el render
+es chico. Si el user va a ver el portfolio el día que reporta SNOW, el sistema
+debería **gritar**.
+
+**Plan**
+
+- ✅ Banner sticky debajo del masthead cuando hay earnings en las próximas 48h
+  para tickers que el user tiene en portfolio.
+- ✅ Treatment editorial: mono kicker "EARNINGS WINDOW", serif body con
+  countdown ("en 3h 12min"), citrus pulse a la izquierda reutilizando el
+  `live-pulse` keyframe.
+- ✅ Diferenciación visual cuando es un ticker del user (border citrus reforzado +
+  chip verde "Tenés esta posición") vs cuando no ("No tenés posición").
+- ✅ CTA "Ver detalle" salta al workspace con el ticker preseleccionado.
+- ✅ Dismiss persistido por evento en `localStorage` — no reaparece para el
+  mismo evento pero sí para uno nuevo.
+- ⏳ **Pendiente para 6.2b**: "surprise history grid" (4×3 con los últimos 12 Q,
+  cada uno coloreado bull/bear según beat/miss) en el earnings panel del
+  workspace. Requiere endpoint nuevo que pegue contra yfinance `earnings_history`.
+- ⏳ **Pendiente para 6.2c**: pre/post-market reaction % del día después.
+
+> ✅ DONE (banner) 2026-05-28 por Claude. `apps/web/prototype/index.html`
+> nuevo `<aside class="earnings-banner">`, `app.js` con `refreshEarningsBanner`,
+> `formatEarningsCountdown`, `dismissedEarningsKeys`. Soft-fail si la API
+> falla. Animación entrada con cubic-bezier spring. Responsive: stack vertical
+> a <720px.
+
+### 6.3 · Decision audit loop completo `[ ]`
+
+**Por qué**: ya guardamos las decisiones del user vía `POST /decisions` con
+snapshot completo del análisis. Falta el ciclo de retorno: "qué hubieras ganado
+si seguías la sugerencia".
+
+**Plan**
+
+- Job offline `python -m market_bot.jobs.realize_decisions` que para cada
+  decision de hace ≥N días, calcula el `realized_return` (yfinance diff) y
+  lo persiste en `user_decisions.realized_return`.
+- Endpoint `GET /decisions/track-record?ticker=X&since=...` que devuelva
+  hit rate, avg return per decision, Sharpe del set.
+- UI: "Tu track record" tile en el workspace logged-in.
+
+### 6.4 · Social sentiment (Agent K, deferido) `[ ]`
+
+**Estado actual**: deferido. Ahora con audit + Brier funcionando, es momento de
+revisitar. Idea: integrar reddit/X via free tier + filtrar por confidence.
+
+**Plan**
+
+- Adapter `packages/reference_data/.../social.py` con yfinance social
+  fallback + opt-in `BEARER_REDDIT_TOKEN` para reddit search.
+- Sentiment scoring por (volume × tone × source_reputation).
+- Catalyst de tipo "social_chatter" con `status=RUMORED` por default. La
+  política de rumor ya está implementada (`RUMOR_MAX_SCENARIO_DELTA`).
+
+### 6.5 · Paper trading sandbox (Agent L precursor) `[ ]`
+
+**Por qué**: Wallbit/trading real está bloqueado hasta tener confianza en el motor.
+Mientras tanto, simular órdenes para que el user pueda testear estrategias.
+
+**Plan**
+
+- Tabla `paper_orders` (user_id, ticker, side, qty, fill_price, timestamp, strategy_tag).
+- Endpoint `POST /paper/orders` que registra una orden virtual al precio actual.
+- `GET /paper/performance` con métricas tipo backtest.
+- UI: "Practice mode" toggle que reemplaza Buy/Sell por "Simular compra/venta".
+
+### 6.6 · Sector + region exposure breakdown `[ ]`
+
+**Por qué**: el user ve P&L total pero no sabe que está 60% en tech o que tiene
+muy poca diversificación geográfica.
+
+**Plan**
+
+- `packages/reference_data/.../classification.py` con map ticker → sector/region
+  (yfinance `info` o tabla canónica).
+- En `portfolio_summary`, sumar exposure breakdown.
+- UI: doughnut chart (HTML+CSS, sin libs) abajo del FX diagnostic tile.
+
+### 6.7 · Push alerts (mobile/desktop) `[ ]`
+
+**Por qué**: las oportunidades pasan cuando el user no está mirando la app.
+
+**Plan**
+
+- Service worker en el frontend para web push.
+- Cron job en el backend que cada N minutos:
+  - Re-ranquea con `mode=opportunities` para cada user logged in.
+  - Si el top-1 cambió desde el último envío, push notification "SNOW saltó al top: earnings beat".
+- Opt-in en perfil.
+
+### 6.8 · Multi-currency portfolios `[ ]`
+
+**Por qué**: hoy asumimos que todo se valúa en ARS+USD vía CCL/MEP. Si el user
+tiene cripto, EUR, BRL, etc., no funciona.
+
+**Plan**
+
+- Extender `currency` enum: ARS / USD / EUR / BRL / BTC / ETH.
+- FX matrix vs USD vía yfinance currency pairs.
+- UI: selector de "moneda base" del portfolio (no solo ARS).
+
+### 6.9 · Backtest del ranking (no solo de tickers) `[ ]`
+
+**Por qué**: el `BacktestSummary` actual mide un ticker individual. Lo que importa
+es: si el user hubiera seguido la sugerencia top-3 del ranking cada día, qué
+hubiera pasado.
+
+**Plan**
+
+- Job `python -m market_bot.jobs.backtest_ranking --start=YYYY-MM-DD`.
+- Para cada día, re-corre `rank_universe`, "compra" top-3 con weight uniforme,
+  rebalancea al día siguiente.
+- Métricas: cum return, max drawdown, hit rate, Sharpe, comparison vs SPY buy-and-hold.
+- UI: "Track record del ranking" panel.
+
+### 6.10 · Onboarding tour `[ ]`
+
+**Por qué**: cuando alguien entra por primera vez, no sabe por dónde empezar.
+
+**Plan**
+
+- Componente tour con 4 steps: (1) cargar perfil, (2) importar Balanz, (3)
+  ver análisis del primer ticker, (4) abrir ranking de oportunidades.
+- Dismissable, no reaparece.
+
 ### Out-of-scope para Sprint 4 (registrar como deuda)
 - **Backup automático del SQLite** — Fly volume es persistente pero único punto de falla. Plan v2: snapshot diario a S3 o a Cloudflare R2.
 - **Rate limit basado en Redis** — el actual es in-memory, no sirve con múltiples instancias. v2 cuando se necesite scale horizontal.
@@ -377,5 +787,40 @@ Cuando vos (Codex / Claude / human) terminés una task:
 5. No empieces a trabajar en `[~]` si no estás seguro de que el otro asistente lo soltó — preguntá al usuario.
 
 ### Estado actual de in-progress
-- _Ninguno_. Milestone cerrado al 2026-05-27. Next move: Agent K (social) o Agent L (trading) —
-  decidir basándose en feedback de usuario real y en lecturas de `/decisions` + `/validation`.
+- **Sprint 4 (deploy)** [~]: scaffolding listo, app corriendo local, deploy real Vercel+Fly pendiente.
+- **Sprint 5 (polish + correctness)** ✅ Cerrado salvo 5.5 (otras cosas raras del user).
+- **Sprint 6 (future improvements)** [~] avanzado en 2026-05-28:
+  - 6.0 (typography pass del portfolio summary) ✅ DONE — hero + satellites + real-return bar.
+  - 6.1 (canonical CEDEAR ratios) ✅ DONE — 50+ tickers + chip de source en holding card.
+    - 6.1b (Balanz FX columns read) ⏳ pendiente.
+  - 6.2 (earnings calendar UI) ✅ DONE — banner sticky con countdown + CTA + dismiss persistente.
+    - 6.2b (surprise history grid) ⏳ pendiente, requiere endpoint nuevo.
+    - 6.2c (pre/post-market reaction %) ⏳ pendiente.
+  - 6.3 – 6.10 ⏳ siguen en cola.
+- **48/48 tests pasan** offline en 2.61s.
+
+### Audit UI/UX completado (2026-05-28)
+Documentado en transcripción de chat. Strengths preservadas: identidad
+Fraunces+DM Sans+JetBrains Mono, paleta citrus, dual-theme system. Issues
+atacados en typography pass: jerarquía visual (B1), formato monetario (B5),
+weight/sizing de números (B6), real return como protagonista (B7). Issues
+abiertos para iteración posterior: redundancia de labels (B2), citrus glow
+oversize (B3), 5 benchmark cards redundantes (B4), surface tabs density (B8),
+hover state genérico en radar cards (B10).
+
+### Next moves sugeridos (orden de prioridad)
+1. **Verificación visual con el user** — refrescar app y validar:
+   - Hero number gigante en el portfolio summary.
+   - Bull/bear coloring funcionando en P&L tiles.
+   - Banner de earnings aparece cuando hay eventos ≤48h.
+   - Chip de "BYMA oficial" / "No verificado" en cada holding card según ratio source.
+2. **Re-import del Balanz con `replace_existing=true`** — recupera las 2 USD positions
+   y aprovecha la tabla canónica nueva para ratios correctos.
+3. **Sprint 6.1b** (leer FX desde el xlsx de Balanz) — completa la corrección de cost basis
+   para fechas viejas donde argentinadatos.com puede no tener data.
+4. **Sprint 6.2b** (surprise history grid) — el card con los últimos 12 Q de beat/miss
+   por ticker. Requiere endpoint `/earnings/{ticker}/history`.
+5. **Audit issues abiertos B2/B3/B4/B8** — iteración de "design polish 2" cuando haya
+   chance de respirar.
+6. **Cerrar Sprint 4** — deploy real Vercel+Fly.
+7. **Sprint 6.3 / 6.5** — decision audit loop + paper trading.

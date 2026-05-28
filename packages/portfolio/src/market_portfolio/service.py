@@ -198,6 +198,192 @@ class PortfolioService:
             positions=positions,
         )
 
+    def custom_benchmark_comparison(
+        self,
+        user_id: int,
+        ticker: str,
+        benchmark_preference: str,
+        risk_tolerance: str = "medium",
+    ) -> dict:
+        """Compute "what if I had bought TICKER instead of my actual portfolio".
+
+        For each position, take the ARS cost at purchase, convert to USD at the
+        purchase-date CCL, "buy" TICKER at its closing price on that date, then
+        re-value at today's price × current CCL. Sum across positions to get
+        the hypothetical tracked value.
+
+        This powers the ad-hoc benchmark feature so the user can ask
+        "what would I have today if I had bought SPY / VOO / BTC-USD / GLD
+        instead of these stocks?".
+        """
+        normalized_ticker = ticker.strip().upper()
+        if not normalized_ticker:
+            raise PortfolioError("Ticker requerido.")
+
+        positions = self.list_positions(
+            user_id,
+            benchmark_preference,
+            risk_tolerance=risk_tolerance,
+        )
+        if not positions:
+            raise PortfolioError("Necesitás cargar posiciones para comparar contra un benchmark custom.")
+
+        # Fetch full price history once and look up by date.
+        try:
+            import yfinance as yf  # type: ignore
+        except ModuleNotFoundError as exc:
+            raise PortfolioError("yfinance no esta instalado.") from exc
+
+        oldest = min(p.purchase_date for p in positions)
+        # Buffer the window so we can find the closest valid close even if the
+        # purchase fell on a weekend / holiday.
+        start = (oldest - pd.Timedelta(days=10)).strftime("%Y-%m-%d")
+        try:
+            history = yf.download(
+                normalized_ticker,
+                start=start,
+                interval="1d",
+                auto_adjust=True,
+                progress=False,
+            )
+        except Exception as exc:
+            raise PortfolioError(f"No se pudo obtener historia para {normalized_ticker}.") from exc
+
+        if history is None or history.empty:
+            raise PortfolioError(f"Sin datos para {normalized_ticker}.")
+        if isinstance(history.columns, pd.MultiIndex):
+            try:
+                close_series = history["Close"][normalized_ticker]
+            except Exception:
+                close_series = history["Close"].iloc[:, 0]
+        else:
+            close_series = history["Close"]
+        close_series = close_series.dropna()
+        if close_series.empty:
+            raise PortfolioError(f"Serie de cierres vacía para {normalized_ticker}.")
+
+        latest_price_usd = float(close_series.iloc[-1])
+        current_ccl = self.benchmark_service.get_current_exchange_rates().ccl
+
+        total_cost_ars = 0.0
+        total_tracked_ars = 0.0
+        per_position_breakdown: list[dict] = []
+
+        for position in positions:
+            cost_ars = float(position.cost_basis_ars)
+            total_cost_ars += cost_ars
+
+            # USD invested at purchase-date CCL.
+            snapshot = self.benchmark_service.build_period_snapshot(
+                position.purchase_date, date.today()
+            )
+            purchase_ccl = snapshot.purchase_exchange.ccl
+            if purchase_ccl <= 0:
+                continue
+            usd_invested = cost_ars / purchase_ccl
+
+            # Closing price on or before the purchase date.
+            purchase_ts = pd.Timestamp(position.purchase_date)
+            window = close_series.loc[:purchase_ts]
+            if window.empty:
+                # Ticker didn't exist yet on that date — skip but record it.
+                per_position_breakdown.append({
+                    "symbol": position.symbol,
+                    "purchase_date": position.purchase_date.isoformat(),
+                    "skipped": True,
+                    "reason": "ticker no listado en esa fecha",
+                })
+                continue
+            purchase_price_usd = float(window.iloc[-1])
+            if purchase_price_usd <= 0:
+                continue
+
+            hypothetical_shares = usd_invested / purchase_price_usd
+            current_value_usd = hypothetical_shares * latest_price_usd
+            current_value_ars = current_value_usd * current_ccl
+            total_tracked_ars += current_value_ars
+
+            per_position_breakdown.append({
+                "symbol": position.symbol,
+                "purchase_date": position.purchase_date.isoformat(),
+                "cost_ars": round(cost_ars, 2),
+                "usd_invested": round(usd_invested, 2),
+                "hypothetical_shares": round(hypothetical_shares, 6),
+                "current_value_ars": round(current_value_ars, 2),
+            })
+
+        outperformance_ars = total_tracked_ars - total_cost_ars
+        outperformance_pct = (
+            outperformance_ars / total_cost_ars if total_cost_ars > 0 else 0.0
+        )
+
+        return {
+            "ticker": normalized_ticker,
+            "label": normalized_ticker,
+            "tracked_value_ars": round(total_tracked_ars, 2),
+            "outperformance_ars": round(outperformance_ars, 2),
+            "outperformance_pct": round(outperformance_pct, 4),
+            "current_price_usd": round(latest_price_usd, 4),
+            "current_ccl": round(current_ccl, 2),
+            "sample_size": len([b for b in per_position_breakdown if not b.get("skipped")]),
+            "breakdown": per_position_breakdown,
+        }
+
+    def diagnostics(
+        self,
+        user_id: int,
+        benchmark_preference: str,
+        risk_tolerance: str = "medium",
+    ) -> dict:
+        """Per-position raw values used in the valuation.
+
+        Exposed so we can debug *why* a portfolio value looks wrong. If the
+        ARS total is off, this endpoint shows the local BYMA price + underlying
+        USD price + ratio used for each position. The wrong one is usually
+        a yfinance fetch returning stale or misaligned data for the .BA ticker.
+        """
+        positions = self.list_positions(
+            user_id,
+            benchmark_preference,
+            risk_tolerance=risk_tolerance,
+        )
+        current_exchange = self.benchmark_service.get_current_exchange_rates()
+
+        breakdown = []
+        for p in positions:
+            implied_fx = (
+                p.current_value_ars / p.current_value_usd
+                if p.current_value_usd
+                else 0.0
+            )
+            breakdown.append({
+                "symbol": p.symbol,
+                "instrument_type": p.instrument_type,
+                "quantity": p.quantity,
+                "cedear_ratio": p.cedear_ratio,
+                "ratio_source": p.cedear_ratio_source,
+                "current_price": p.current_price,
+                "current_price_currency": p.current_price_currency,
+                "current_value_ars": p.current_value_ars,
+                "current_value_usd": p.current_value_usd,
+                "cost_basis_ars": p.cost_basis_ars,
+                "cost_basis_usd": p.cost_basis_usd,
+                "implied_fx": round(implied_fx, 2),
+                "fx_drift_pct": (
+                    round((implied_fx - current_exchange.ccl) / current_exchange.ccl * 100, 2)
+                    if current_exchange.ccl
+                    else 0.0
+                ),
+            })
+
+        return {
+            "as_of": date.today().isoformat(),
+            "current_ccl": current_exchange.ccl,
+            "current_mep": current_exchange.mep,
+            "current_official": current_exchange.official,
+            "positions": breakdown,
+        }
+
     def _build_position_valuation(
         self,
         position: PositionRecord,
@@ -215,14 +401,28 @@ class PortfolioService:
             local_price_ars, quote_date = self._latest_close(local_symbol)
             underlying_price_usd, _ = self._latest_close(position.underlying_ticker)
             current_value_ars = position.quantity * local_price_ars
-            cedear_ratio = position.cedear_ratio or 1.0
-            current_value_usd = (position.quantity / cedear_ratio) * underlying_price_usd
+            # USD value for CEDEAR uses CCL conversion of the ARS market value.
+            # This is robust against ratio inference errors: even if the stored
+            # cedear_ratio is wrong, the USD figure still reflects what the user
+            # would get by selling the CEDEARs and dollarizing through CCL.
+            # The (qty / ratio) × underlying_price formula gave wildly wrong USD
+            # when the ratio fell back to 1.0 or to a parity-snapped neighbor.
+            current_ccl = snapshot.current_exchange.ccl
+            if current_ccl > 0:
+                current_value_usd = current_value_ars / current_ccl
+            else:
+                # Last-resort fallback that at least doesn't blow up.
+                cedear_ratio = position.cedear_ratio or 1.0
+                current_value_usd = (position.quantity / cedear_ratio) * underlying_price_usd
             current_price = local_price_ars
             current_currency = "ARS"
             if position.cedear_ratio_source == "estimated_market_parity":
                 notes.append("La relacion CEDEAR se estimo por paridad de mercado y conviene validarla.")
             if position.cedear_ratio_source == "fallback_default":
-                notes.append("No se pudo inferir la relacion CEDEAR. Se uso ratio 1 por defecto.")
+                notes.append(
+                    "No se pudo inferir la relacion CEDEAR para este ticker. "
+                    "El valor en USD se calcula via CCL, pero verificar la cantidad efectiva de subyacente."
+                )
         else:
             underlying_price_usd, quote_date = self._latest_close(position.underlying_ticker)
             current_value_usd = position.quantity * underlying_price_usd

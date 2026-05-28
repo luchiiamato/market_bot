@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from ..contracts import (
     ActionSuggestion,
@@ -22,6 +23,12 @@ DIRECTIONAL_SHORT_ACTIONS = {
     ActionType.COVERED_CALL,
     ActionType.CASH_SECURED_PUT,
 }
+
+
+# Tickers that act as "background market beta" and should be deprioritised when
+# the caller asks for opportunities-style filtering (a user looking for SNOW
+# doesn't want SPY at the top of the list).
+INDEX_BIAS_TICKERS = {"SPY", "QQQ", "IBB", "DIA", "VOO", "VTI"}
 
 
 @dataclass(frozen=True)
@@ -60,6 +67,126 @@ def suggest_actions(
 
 def rank_score(deterministic: DeterministicSignal, probabilistic: ProbabilisticSignal) -> float:
     return round((deterministic.score * 0.65) + (probabilistic.confidence * 35), 2)
+
+
+def adjust_rank_for_catalysts(
+    base_score: float,
+    analysis: TickerAnalysis,
+    *,
+    now: datetime | None = None,
+) -> tuple[float, list[str]]:
+    """Boost the rank score when a ticker has live catalysts.
+
+    Returns (adjusted_score, reasons) so callers can both rerank and surface
+    *why* a name jumped. This is what makes earnings-day movers (SNOW, NVDA
+    post-print, COIN on regulatory news) actually appear at the top of the
+    ranking instead of getting buried by static mega-caps.
+
+    Multipliers stack but are capped so a single catalyst can't dominate.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    multiplier = 1.0
+    reasons: list[str] = []
+
+    confirmed_earnings = [
+        c for c in analysis.catalysts
+        if c.category == "earnings" and c.status == CatalystStatus.CONFIRMED
+    ]
+    reported_earnings = [
+        c for c in analysis.catalysts
+        if c.category == "earnings" and c.status == CatalystStatus.REPORTED
+    ]
+    fresh_reported = [
+        c for c in analysis.catalysts
+        if c.status == CatalystStatus.REPORTED
+        and c.observed_at
+        and _hours_since(c.observed_at, now) <= 48
+    ]
+
+    # Confirmed earnings event within the ranking horizon → strongest bump.
+    # This is what catches "SNOW reports tonight" or "MELI reports tomorrow".
+    if confirmed_earnings:
+        multiplier *= 1.25
+        first = confirmed_earnings[0]
+        reasons.append(f"Catalyst confirmado: {first.name[:80]}.")
+
+    # Recently reported news (≤48h) about the name → second-strongest bump.
+    # This catches "SNOW beat expectations 12 hours ago".
+    if fresh_reported:
+        multiplier *= 1.20
+        first = fresh_reported[0]
+        reasons.append(f"News fresca (<48h): {first.name[:80]}.")
+    elif reported_earnings:
+        multiplier *= 1.10
+        reasons.append("Earnings recientes reportados.")
+
+    # Outsized realised volatility coupled with directional conviction → mover.
+    indicators = analysis.indicators
+    if indicators.atr and indicators.price:
+        vol_ratio = indicators.atr / indicators.price
+        if vol_ratio > 0.05 and analysis.deterministic.direction.value in {"long", "short"}:
+            multiplier *= 1.12
+            reasons.append(f"Volatilidad elevada ({vol_ratio:.1%}) con direccion definida.")
+
+    # Volume spike (≥2x average) — usually means something is happening today.
+    if indicators.volume_ratio and indicators.volume_ratio >= 2.0:
+        multiplier *= 1.08
+        reasons.append(f"Volumen {indicators.volume_ratio:.1f}x el promedio.")
+
+    # Cap the total boost so one ticker can't go 2x+ on stacked signals alone.
+    multiplier = min(multiplier, 1.65)
+
+    adjusted = round(base_score * multiplier, 2)
+    return adjusted, reasons
+
+
+def is_opportunity_candidate(analysis: TickerAnalysis) -> bool:
+    """Return True if the ticker is interesting enough for opportunities mode.
+
+    An opportunity needs *something happening* — a catalyst, a volume spike,
+    or an outsized volatility move. Pure mega-cap drift doesn't qualify; the
+    user can find SPY without our help.
+    """
+    has_catalyst = any(
+        c.status in {CatalystStatus.CONFIRMED, CatalystStatus.REPORTED}
+        for c in analysis.catalysts
+    )
+    if has_catalyst:
+        return True
+
+    indicators = analysis.indicators
+    if indicators.atr and indicators.price:
+        if (indicators.atr / indicators.price) > 0.04:
+            return True
+
+    if indicators.volume_ratio and indicators.volume_ratio >= 1.8:
+        return True
+
+    # High conviction with directional bias is also an opportunity even without
+    # an explicit catalyst — the model is loudly saying something.
+    if (
+        analysis.probabilistic.confidence >= 0.7
+        and analysis.deterministic.direction.value in {"long", "short"}
+    ):
+        return True
+
+    return False
+
+
+def is_index_bias_ticker(ticker: str) -> bool:
+    return ticker.upper() in INDEX_BIAS_TICKERS
+
+
+def _hours_since(observed_at: datetime, now: datetime) -> float:
+    # Some sources hand us naive datetimes — treat them as UTC so the diff
+    # doesn't blow up on TZ mismatch.
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return max(0.0, (now - observed_at).total_seconds() / 3600.0)
 
 
 def adjust_rank_for_profile(base_score: float, analysis: TickerAnalysis, profile: ProfileFilter) -> float:

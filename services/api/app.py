@@ -360,6 +360,44 @@ def portfolio_summary(current_user: AuthenticatedUser = Depends(get_current_user
     return PortfolioSummaryResponse.model_validate(summary, from_attributes=True)
 
 
+@app.get("/portfolio/benchmarks/custom")
+def portfolio_custom_benchmark(
+    ticker: str = Query(..., min_length=1, max_length=14),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    """Compute hypothetical portfolio value if the user had bought TICKER on
+    each purchase date instead of the actual stocks. Powers the ad-hoc
+    benchmark feature in the UI ("¿qué hubiera pasado con SPY en lugar de
+    estas acciones?")."""
+    profile = identity_service.get_profile(current_user.user_id)
+    try:
+        return portfolio_service.custom_benchmark_comparison(
+            current_user.user_id,
+            ticker=ticker,
+            benchmark_preference=profile.benchmark_preference,
+            risk_tolerance=profile.risk_tolerance,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@app.get("/portfolio/diagnostics")
+def portfolio_diagnostics(
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    """Per-position raw valuation data — used to investigate why a number
+    looks off. Surfaces local BYMA price, ratio, implied FX, and drift vs CCL."""
+    profile = identity_service.get_profile(current_user.user_id)
+    return portfolio_service.diagnostics(
+        current_user.user_id,
+        benchmark_preference=profile.benchmark_preference,
+        risk_tolerance=profile.risk_tolerance,
+    )
+
+
 @app.post("/portfolio/import/balanz", response_model=BalanzImportResponse)
 async def import_balanz_extract(
     request: Request,
@@ -467,6 +505,15 @@ def rankings(
     horizon: str = Query(default="short", pattern="^(short|long)$"),
     limit: int = Query(default=6, ge=1, le=25),
     cedear_only: bool = Query(default=True),
+    mode: str = Query(
+        default="default",
+        pattern="^(default|opportunities)$",
+        description=(
+            "default: ranking estándar con boost por catalysts. "
+            "opportunities: solo nombres con catalyst / volumen / volatilidad altos, "
+            "sin index ETFs."
+        ),
+    ),
     current_user: Optional[AuthenticatedUser] = Depends(get_optional_user),
 ) -> list[RankingItemResponse]:
     profile_filter = None
@@ -484,6 +531,7 @@ def rankings(
             limit=limit,
             cedear_only=cedear_only,
             profile=profile_filter,
+            mode=mode,
         )
     except MarketDataError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

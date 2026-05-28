@@ -1,3 +1,13 @@
+// Build stamp — bumped on every UI design pass. Visible at the bottom of the
+// page AND in the console so we can confirm a fresh build is loaded when the
+// user reports "I don't see changes" (usually a cache issue).
+const MARKET_BOT_UI_BUILD = "2026-05-28 · design-v3 · opportunity-cost";
+console.info(`%cMarket Bot UI build: ${MARKET_BOT_UI_BUILD}`, "color:#c6f25c;font-weight:600");
+document.addEventListener("DOMContentLoaded", function () {
+  const mark = document.getElementById("build-mark");
+  if (mark) mark.textContent = `UI build · ${MARKET_BOT_UI_BUILD}`;
+});
+
 // API base resolution order:
 // 1. ?apiBase=…       — debug / temporary override
 // 2. localStorage      — user-set persistent override
@@ -317,6 +327,260 @@ const GLOSSARY_TERMS = [
     category: "Técnico",
     short: "Falsa ruptura bajista que rebota enseguida.",
     detail: "La bear trap castiga a quien entra tarde al downside. Puede ser señal de absorción de oferta y gatillo para un rebote fuerte."
+  },
+
+  // ─── Acronyms financieros + conceptos trending (2026) ──────────────────────
+  {
+    id: "ath",
+    label: "ATH",
+    category: "Acronym",
+    short: "All-Time High — el precio más alto que jamás registró el activo.",
+    detail: "All-Time High. Cuando un activo rompe ATH, sale a precio descubrimiento: no hay resistencia histórica arriba. Suele ser zona de FOMO compradora y también de toma de ganancias institucional."
+  },
+  {
+    id: "atl",
+    label: "ATL",
+    category: "Acronym",
+    short: "All-Time Low — el precio más bajo registrado.",
+    detail: "All-Time Low. Inverso del ATH. Romper ATL suele ser señal técnica destructiva — todos los que compraron arriba están perdiendo y la presión vendedora aumenta. Cuidado con cuchillos cayendo."
+  },
+  {
+    id: "cagr",
+    label: "CAGR",
+    category: "Acronym",
+    short: "Tasa de crecimiento anual compuesta de una inversión.",
+    detail: "Compound Annual Growth Rate. Es el rendimiento anualizado equivalente que tendría una inversión si creciera de manera uniforme. Útil para comparar instrumentos con horizontes distintos. Fórmula: (Vf/Vi)^(1/años) − 1."
+  },
+  {
+    id: "ytd",
+    label: "YTD",
+    category: "Acronym",
+    short: "Year-To-Date — desde el 1 de enero hasta hoy.",
+    detail: "Year-To-Date. Mide el retorno acumulado en lo que va del año calendario. Es la referencia más usada para comparar performance contra índices (S&P 500 YTD, Merval YTD)."
+  },
+  {
+    id: "mtd",
+    label: "MTD",
+    category: "Acronym",
+    short: "Month-To-Date — desde el inicio del mes en curso.",
+    detail: "Month-To-Date. Útil para evaluar performance reciente sin el ruido del año entero. Junto con YTD da una lectura rápida de cómo viene la cosa."
+  },
+  {
+    id: "qtd",
+    label: "QTD",
+    category: "Acronym",
+    short: "Quarter-To-Date — desde el inicio del trimestre.",
+    detail: "Quarter-To-Date. Especialmente relevante porque las empresas reportan trimestrales (Q1, Q2, Q3, Q4) y los hedge funds rebalancean al cierre de cada Q."
+  },
+  {
+    id: "fy",
+    label: "FY26 / FY27",
+    category: "Acronym",
+    short: "Fiscal Year — año fiscal de la empresa, no necesariamente calendario.",
+    detail: "Fiscal Year. Apple usa FY que termina en septiembre; Microsoft en junio. Cuando un analista dice 'FY27 EPS', se refiere al año fiscal proyectado, no al calendario. Importante para no confundir guidance."
+  },
+  {
+    id: "q1-q4",
+    label: "1Q26 / Q1 2026",
+    category: "Acronym",
+    short: "Cuarto trimestre fiscal. 1Q26 = primer trimestre del FY 2026.",
+    detail: "Notación de earnings calls. 1Q26 = Q1 del fiscal year 2026 de la empresa. Cada trimestre tiene un earnings release: revenue, EPS, guidance forward. El movimiento post-earnings suele ser el catalyst más grande del año."
+  },
+  {
+    id: "eps",
+    label: "EPS",
+    category: "Acronym",
+    short: "Earnings Per Share — ganancia neta dividida acciones en circulación.",
+    detail: "Earnings Per Share. EPS reportado vs EPS consensus es el dato clave en cada earnings call. Beat = reportado supera estimado. Miss = quedó debajo. La reacción del precio depende más del guidance forward que del EPS pasado."
+  },
+  {
+    id: "pe-ratio",
+    label: "P/E",
+    category: "Acronym",
+    short: "Price-to-Earnings — múltiplo de valuación clásico.",
+    detail: "Price-to-Earnings ratio. Cuántos dólares pagás por cada dólar de ganancia anual. P/E alto = mercado paga premium por crecimiento (NVDA, TSLA). P/E bajo = value (XOM, F). Compará siempre contra peers de la misma industria."
+  },
+  {
+    id: "peg",
+    label: "PEG",
+    category: "Acronym",
+    short: "P/E ajustado por crecimiento esperado.",
+    detail: "Price/Earnings to Growth. PEG = P/E / tasa de crecimiento %. Idea de Peter Lynch: si PEG < 1, la acción está barata relativa a su crecimiento. Más útil para growth stocks que P/E solo."
+  },
+  {
+    id: "ev-ebitda",
+    label: "EV/EBITDA",
+    category: "Acronym",
+    short: "Múltiplo de valor empresa sobre ganancia operativa.",
+    detail: "Enterprise Value / EBITDA. Más limpio que P/E porque elimina el efecto de deuda y impuestos. Estándar para M&A y para comparar empresas con estructuras de capital distintas."
+  },
+  {
+    id: "fcf",
+    label: "FCF",
+    category: "Acronym",
+    short: "Free Cash Flow — caja libre que genera el negocio.",
+    detail: "Free Cash Flow = operating cash flow − capex. Es la métrica preferida de inversores serios (Buffett-style) porque es plata real, no contable. FCF yield = FCF / market cap."
+  },
+  {
+    id: "tam",
+    label: "TAM",
+    category: "Acronym",
+    short: "Total Addressable Market — tamaño máximo del mercado.",
+    detail: "Total Addressable Market. Cuánta plata podría generar la empresa si capturara el 100% del mercado. TAM grande + bajo penetration % = thesis típica de growth/AI."
+  },
+  {
+    id: "arr",
+    label: "ARR / MRR",
+    category: "Acronym",
+    short: "Annual / Monthly Recurring Revenue de un SaaS.",
+    detail: "ARR = Annual Recurring Revenue. MRR = Monthly. Métricas clave para SaaS (Salesforce, Snowflake, CrowdStrike). Crecimiento de ARR > 30% YoY se considera alto. Net Revenue Retention (NRR) > 120% es excelente."
+  },
+  {
+    id: "yoy",
+    label: "YoY / QoQ",
+    category: "Acronym",
+    short: "Year-over-Year / Quarter-over-Quarter — comparación temporal.",
+    detail: "YoY (Year over Year) compara el mismo trimestre vs el anterior año. QoQ (Quarter over Quarter) compara consecutivos. YoY es más confiable porque limpia estacionalidad. Headline siempre se reporta YoY."
+  },
+  {
+    id: "guidance",
+    label: "Guidance",
+    category: "Concepto",
+    short: "Proyección de resultados que la empresa publica.",
+    detail: "Guidance es el outlook que da la empresa para el próximo trimestre o año fiscal. Un raise = sube la guía vs anterior. Cut = la baja. El precio reacciona MÁS al guidance que al beat/miss del trimestre reportado."
+  },
+  {
+    id: "consensus",
+    label: "Consensus",
+    category: "Concepto",
+    short: "Promedio de estimaciones de analistas para earnings/revenue.",
+    detail: "Consensus estimate = el número que el mercado ya espera. Beat/miss se mide contra esto, no contra el año pasado. Whisper number = el número 'real' que se rumorea entre traders, suele ser más exigente que el consensus público."
+  },
+  {
+    id: "buyback",
+    label: "Buyback",
+    category: "Concepto",
+    short: "La empresa compra sus propias acciones en mercado.",
+    detail: "Stock buyback / share repurchase. Reduce el número de acciones en circulación → sube EPS automáticamente. Apple, Meta y Google son los reyes del buyback. Suele ser señal de management confiando en su valuación."
+  },
+  {
+    id: "dividend-yield",
+    label: "Dividend Yield",
+    category: "Concepto",
+    short: "Dividendo anual dividido el precio actual.",
+    detail: "Yield = dividend per share / price. Las empresas maduras pagan dividendos (KO, JPM, XOM). En Argentina, los CEDEARs también pagan, pero hay que considerar el FX y la retención del 10%."
+  },
+  {
+    id: "moat",
+    label: "Moat",
+    category: "Concepto",
+    short: "Ventaja competitiva sostenible que protege márgenes.",
+    detail: "Economic moat. Término popularizado por Buffett. Tipos: network effect (Meta), switching costs (Microsoft), brand (Coca-Cola), low-cost (Costco), intangible assets (patentes). Sin moat, los márgenes se erosionan."
+  },
+  {
+    id: "drawdown",
+    label: "Drawdown",
+    category: "Riesgo",
+    short: "Caída desde el último máximo hasta el mínimo subsecuente.",
+    detail: "Max Drawdown = peor caída pico-a-valle que sufrió una inversión. Para evaluar estrategias importa más que el retorno total: una estrategia con +40% retorno pero −60% drawdown probablemente no la tolerás. Calmar ratio = retorno / |max DD|."
+  },
+  {
+    id: "sharpe",
+    label: "Sharpe Ratio",
+    category: "Riesgo",
+    short: "Retorno ajustado por riesgo (volatilidad).",
+    detail: "Sharpe = (retorno − tasa libre de riesgo) / desviación estándar. Sharpe > 1 = bueno. > 2 = excelente. > 3 = sospechoso. Mide eficiencia: dos estrategias con mismo retorno pero distinta volatilidad tienen Sharpe distinto."
+  },
+  {
+    id: "beta",
+    label: "Beta",
+    category: "Riesgo",
+    short: "Sensibilidad de un activo al movimiento del mercado.",
+    detail: "Beta = covarianza(activo, mercado) / varianza(mercado). β = 1 → se mueve con el S&P. β > 1 → más volátil (NVDA ~1.7). β < 1 → más defensivo (KO ~0.6). β negativa es rara (oro a veces). No confundir con alpha."
+  },
+  {
+    id: "vix",
+    label: "VIX",
+    category: "Riesgo",
+    short: "Índice de volatilidad esperada del S&P 500.",
+    detail: "VIX = 'fear index'. Mide volatilidad implícita de opciones del SPX a 30 días. VIX < 15 = mercado tranquilo. > 25 = stress. > 40 = pánico (COVID, 2008). VIX cae cuando el mercado sube, por eso es contrarian."
+  },
+  {
+    id: "fomc",
+    label: "FOMC",
+    category: "Evento",
+    short: "Reunión de la Fed donde se decide la tasa de interés.",
+    detail: "Federal Open Market Committee. Se reúne ~8 veces al año. La decisión y el statement de Powell mueven todo: bonos, acciones, dólar, oro, cripto. Dot plot = proyección de tasas. Hawkish = sube tasas / restrictivo. Dovish = baja / acomodaticio."
+  },
+  {
+    id: "cpi-ppi",
+    label: "CPI / PPI",
+    category: "Evento",
+    short: "Inflación al consumidor / al productor — datos macro clave.",
+    detail: "CPI (Consumer Price Index) sale mensualmente en USA. PPI (Producer Price Index) anticipa. Core CPI excluye comida y energía (más volátiles). Datos por arriba de expectativas → la Fed sube tasas → S&P baja. Es el calendario macro #1."
+  },
+  {
+    id: "nfp",
+    label: "NFP",
+    category: "Evento",
+    short: "Non-Farm Payrolls — empleo no agrícola de USA.",
+    detail: "Sale el primer viernes de cada mes a las 8:30 ET. Mide jobs creados, unemployment rate y wage growth. Strong NFP → Fed hawkish → bonos caen. Weak NFP → posible recesión → flight to safety."
+  },
+  {
+    id: "ai-bubble",
+    label: "AI Capex",
+    category: "Trending",
+    short: "Inversión masiva en infraestructura de IA por hyperscalers.",
+    detail: "Microsoft, Meta, Google, Amazon están gastando $200B+ por año en GPUs (NVDA), data centers y energía nuclear (SMR). Trade asociado: AVGO, ANET, VRT, CEG, NRG, ASML. Pregunta abierta: cuándo se monetiza ese capex."
+  },
+  {
+    id: "magnificent-seven",
+    label: "Mag 7",
+    category: "Trending",
+    short: "Las 7 mega-caps tech que mueven el S&P 500.",
+    detail: "Magnificent Seven: AAPL, MSFT, GOOGL, AMZN, META, NVDA, TSLA. Pesan ~30% del S&P 500. Si bajan, baja todo el índice. Concentración récord — nunca antes 7 compañías representaron tanto del mercado."
+  },
+  {
+    id: "etf-flows",
+    label: "ETF Flows",
+    category: "Trending",
+    short: "Entradas/salidas netas de capital en ETFs.",
+    detail: "ETF inflows = compradores netos pagando primas para entrar al fondo. Outflows = redenciones. SPY, QQQ, IBIT (Bitcoin), GLD son los más seguidos. Flows fuertes confirman tendencia o anticipan capitulación."
+  },
+  {
+    id: "dxy",
+    label: "DXY",
+    category: "Trending",
+    short: "Índice del dólar estadounidense vs canasta de monedas.",
+    detail: "Dollar Index. DXY mide USD vs EUR, JPY, GBP, CAD, SEK, CHF. DXY sube → equity emergente (Argentina, Brasil) sufre, oro cae, cripto en general también. DXY < 100 = USD débil. > 105 = fuerte."
+  },
+  {
+    id: "yield-curve",
+    label: "Yield Curve",
+    category: "Trending",
+    short: "Curva de tasas del Tesoro USA por plazo.",
+    detail: "Compara 2Y, 10Y, 30Y treasury yields. Inverted yield curve (2Y > 10Y) predijo todas las recesiones desde 1955. Steepening = mercado descuenta crecimiento. Flattening = desaceleración inminente. Hoy el 10Y rinde ~4.2%."
+  },
+  {
+    id: "carry-trade",
+    label: "Carry Trade",
+    category: "Trending",
+    short: "Pedís prestado barato en una moneda, invertís en otra de tasa alta.",
+    detail: "Clásico: pedís yenes al 0.5%, invertís en pesos al 100%. Funciona si el FX se mantiene. Cuando el yen se aprecia rápido (2024 BoJ hike), el unwind del carry tira abajo todos los activos en simultáneo. Riesgo de tail."
+  },
+  {
+    id: "dollar-cost-averaging",
+    label: "DCA",
+    category: "Concepto",
+    short: "Dollar-Cost Averaging — comprar en cuotas regulares.",
+    detail: "Invertir un monto fijo cada cierto intervalo (semanal/mensual) sin importar el precio. Reduce el riesgo de timing pero también el upside. Es la estrategia recomendada por defecto para inversores no profesionales."
+  },
+  {
+    id: "rebalance",
+    label: "Rebalance",
+    category: "Concepto",
+    short: "Re-ajustar pesos del portfolio a la asignación target.",
+    detail: "Si planificaste 60% acciones / 40% bonos pero las acciones subieron y ahora son 70/30, rebalanceás vendiendo acciones y comprando bonos. Sistemático, no emocional. Frecuencia típica: trimestral o anual."
   }
 ];
 
@@ -336,7 +600,9 @@ const state = {
   portfolioView: "summary",
   activeSurface: "workspace",
   lastTabbedSurface: "workspace",
-  analysisRequestId: 0
+  analysisRequestId: 0,
+  rankingMode: window.localStorage.getItem("marketBotRankingMode") || "default",
+  currentFx: null
 };
 
 const elements = {
@@ -442,6 +708,17 @@ const elements = {
   portfolioStatus: document.querySelector("#portfolio-status"),
   portfolioSummaryGrid: document.querySelector("#portfolio-summary-grid"),
   holdingsGrid: document.querySelector("#holdings-grid"),
+  earningsBanner: document.querySelector("#earnings-banner"),
+  earningsBannerMessage: document.querySelector("#earnings-banner-message"),
+  earningsBannerCta: document.querySelector("#earnings-banner-cta"),
+  earningsBannerDismiss: document.querySelector("#earnings-banner-dismiss"),
+  rankingModeButtons: Array.from(document.querySelectorAll("[data-ranking-mode]")),
+  fxDiagnosticTile: document.querySelector("#fx-diagnostic-tile"),
+  fxDiagnosticSource: document.querySelector("#fx-diagnostic-source"),
+  fxDiagnosticCcl: document.querySelector("#fx-diagnostic-ccl"),
+  fxDiagnosticMep: document.querySelector("#fx-diagnostic-mep"),
+  fxDiagnosticOfficial: document.querySelector("#fx-diagnostic-official"),
+  fxDiagnosticImplied: document.querySelector("#fx-diagnostic-implied"),
   benchmarkPanel: document.querySelector("#benchmark-panel"),
   benchmarkBars: document.querySelector("#benchmark-bars"),
   closeAccountButton: document.querySelector("#close-account-button")
@@ -1185,9 +1462,22 @@ async function loadPortfolioSummary() {
   try {
     const summary = await fetchJson("/portfolio/summary", { auth: true });
     state.portfolioSummary = summary;
+    // Quick visibility into the math so the user (and us) can sanity-check
+    // numbers without opening devtools network panel. The implied FX should
+    // closely match the CCL/MEP — if it doesn't, something is off in the
+    // valuation path.
+    const valArs = Number(summary.total_value_ars) || 0;
+    const valUsd = Number(summary.total_value_usd) || 0;
+    const impliedFx = valUsd ? valArs / valUsd : 0;
+    console.info(
+      `[portfolio] positions=${summary.positions_count} · ARS=${valArs.toLocaleString("es-AR")} · USD=${valUsd.toLocaleString("es-AR")} · implied FX=${impliedFx.toFixed(1)}`
+    );
     renderPortfolioSummary(summary);
     renderMiniSummary(summary);
     await loadPortfolioEarningsWatch();
+    // Banner uses the user's own holdings to prioritize "tickers tuyos primero".
+    const heldSymbols = (summary.positions || []).map((p) => p.underlying_ticker || p.symbol);
+    refreshEarningsBanner(heldSymbols);
     setPortfolioStatus(
       summary.positions_count
         ? `Portfolio actualizado con benchmark ${state.profile.benchmark_preference.toUpperCase()}.`
@@ -1200,6 +1490,8 @@ async function loadPortfolioSummary() {
 }
 
 function renderPortfolioSummary(summary) {
+  refreshFxDiagnostic(summary);
+
   if (!summary.positions_count) {
     elements.portfolioEmptySummary.classList.remove("is-hidden");
     elements.portfolioEmptyHoldings.classList.remove("is-hidden");
@@ -1211,23 +1503,53 @@ function renderPortfolioSummary(summary) {
 
   elements.portfolioEmptySummary.classList.add("is-hidden");
   elements.portfolioEmptyHoldings.classList.add("is-hidden");
-  elements.portfolioSummaryGrid.innerHTML = [
-    ["Posiciones", summary.positions_count],
-    ["Valor ARS", formatCurrency(summary.total_value_ars, "ARS")],
-    ["Valor USD", formatCurrency(summary.total_value_usd, "USD")],
-    ["P&amp;L ARS", formatCurrency(summary.total_pnl_ars, "ARS")],
-    ["P&amp;L USD", formatCurrency(summary.total_pnl_usd, "USD")],
-    ["Real return", formatPercent(summary.total_real_return_pct)]
-  ]
-    .map(
-      ([label, value]) => `
-        <div class="metric-tile">
-          <span class="metric-label">${label}</span>
-          <span class="metric-value">${value}</span>
+
+  // Hero summary — one protagonist number + satellites with semantic color.
+  // Editorial typography pass: replaced 6 equal-weight tiles with a clear
+  // hierarchy. The hero is the ARS value (the user thinks in pesos primarily);
+  // the satellites carry USD and the P&L direction with bull/bear coloring.
+  const totalReturnPct = summary.total_return_pct_ars || 0;
+  const realReturnPct = summary.total_real_return_pct || 0;
+  const pnlArsTone = toneOf(summary.total_pnl_ars);
+  const pnlUsdTone = toneOf(summary.total_pnl_usd);
+  const realTone = toneOf(realReturnPct);
+
+  elements.portfolioSummaryGrid.innerHTML = `
+    <article class="portfolio-hero-summary">
+      <div class="portfolio-hero-main">
+        <p class="analysis-kicker">Valor consolidado</p>
+        <h2 class="portfolio-hero-value" title="${formatMoney(summary.total_value_ars, "ARS")}">
+          ${formatMoney(summary.total_value_ars, "ARS", { magnitude: true })}
+        </h2>
+        <p class="portfolio-hero-meta">
+          <span class="hero-meta-chip tone-${toneOf(totalReturnPct)}">${formatPercent(totalReturnPct, { signed: true })} vs cost basis</span>
+          <span class="hero-meta-divider" aria-hidden="true">·</span>
+          <span>${summary.positions_count} posiciones</span>
+        </p>
+      </div>
+      <div class="portfolio-hero-satellites">
+        <div class="satellite">
+          <span class="satellite-label">Valor USD</span>
+          <strong class="satellite-value">${formatMoney(summary.total_value_usd, "USD")}</strong>
         </div>
-      `
-    )
-    .join("");
+        <div class="satellite">
+          <span class="satellite-label">P&amp;L ARS</span>
+          <strong class="satellite-value tone-${pnlArsTone}">${formatMoney(summary.total_pnl_ars, "ARS", { magnitude: true, signed: true })}</strong>
+        </div>
+        <div class="satellite">
+          <span class="satellite-label">P&amp;L USD</span>
+          <strong class="satellite-value tone-${pnlUsdTone}">${formatMoney(summary.total_pnl_usd, "USD", { signed: true })}</strong>
+        </div>
+        <div class="satellite satellite-real">
+          <span class="satellite-label">Real vs inflación</span>
+          <strong class="satellite-value tone-${realTone}">${formatPercent(realReturnPct, { signed: true })}</strong>
+          <div class="real-return-bar" role="presentation">
+            <div class="real-return-bar-fill tone-${realTone}" style="width:${Math.min(Math.abs(realReturnPct) * 100 * 4, 100).toFixed(2)}%"></div>
+          </div>
+        </div>
+      </div>
+    </article>
+  `;
 
   renderBenchmarkBars(summary);
 
@@ -1236,9 +1558,38 @@ function renderPortfolioSummary(summary) {
       const inflation = position.benchmark_comparisons.find((item) => item.label === "inflation");
       const plazoFijo = position.benchmark_comparisons.find((item) => item.label === "plazo_fijo");
       const ccl = position.benchmark_comparisons.find((item) => item.label === "ccl_usd");
+      // Effective US shares — how many real underlying shares this CEDEAR
+      // position represents. Surfacing this defuses confusion when the user
+      // sees "159 NVDA CEDEARs" but knows NVDA trades at $130 (which would
+      // imply ~$20k if you treated CEDEARs as 1:1 instead of 20:1).
+      const ratio = Number(position.cedear_ratio) || 1;
+      const effectiveShares = position.instrument_type === "cedear" && ratio > 0
+        ? position.quantity / ratio
+        : null;
+      const ratioSourceLabel = {
+        user_supplied: { label: "Cargado por vos", tone: "neutral" },
+        canonical: { label: "BYMA oficial", tone: "bull" },
+        estimated_market_parity: { label: "Inferido por paridad", tone: "neutral" },
+        fallback_default: { label: "No verificado", tone: "bear" }
+      }[position.cedear_ratio_source] || { label: "Manual", tone: "neutral" };
+
       const ratioLine = position.cedear_ratio
-        ? `<span class="tone-chip">Ratio ${position.cedear_ratio} · ${escapeText(toHeadline(position.cedear_ratio_source || "manual"))}</span>`
+        ? `
+          <div class="ratio-chip-stack">
+            <span class="tone-chip">Ratio ${position.cedear_ratio}:1</span>
+            <span class="ratio-source-chip tone-${ratioSourceLabel.tone}">${escapeText(ratioSourceLabel.label)}</span>
+          </div>
+        `
         : "";
+
+      const effectiveSharesLine = effectiveShares !== null
+        ? `<p class="effective-shares-line">
+             <span>Equivale a</span>
+             <strong>${effectiveShares.toLocaleString("es-AR", { maximumFractionDigits: 3 })}</strong>
+             <span>acciones de ${escapeText(position.underlying_ticker)}</span>
+           </p>`
+        : "";
+
       const noteList = position.notes.length
         ? `<ul class="warning-list compact-list">${position.notes.map((note) => `<li>${escapeText(note)}</li>`).join("")}</ul>`
         : "";
@@ -1249,6 +1600,7 @@ function renderPortfolioSummary(summary) {
               <p class="analysis-kicker">${toHeadline(position.instrument_type)}</p>
               <h3>${escapeText(position.symbol)}</h3>
               <p class="panel-caption">${escapeText(position.underlying_ticker)} · Compra ${escapeText(position.purchase_date)}</p>
+              ${effectiveSharesLine}
             </div>
             <div class="holding-actions">
               ${ratioLine}
@@ -1303,6 +1655,48 @@ const BENCHMARK_LABELS = {
   plazo_fijo: "Plazo Fijo"
 };
 
+const BENCHMARK_GLYPHS = {
+  __portfolio: "📈",
+  official_usd: "💵",
+  mep_usd: "💵",
+  ccl_usd: "💵",
+  plazo_fijo: "💸",
+  inflation: "📊",
+  __custom: "🎯"
+};
+
+const BENCHMARK_NARRATIVES = {
+  __portfolio: (cost, current, deltaPct) =>
+    `Vendiste tus pesos, los pusiste en estas acciones y hoy te quedan ${formatMoney(current, "ARS", { magnitude: true })}. Eso es ${formatPercent(deltaPct, { signed: true })} respecto a la plata que pusiste.`,
+  mep_usd: (cost, tracked) =>
+    `Si hubieras comprado dólar MEP en cada compra, hoy tendrías ${formatMoney(tracked, "ARS", { magnitude: true })} (convertido al MEP de hoy).`,
+  ccl_usd: (cost, tracked) =>
+    `Si hubieras dolarizado por CCL en cada compra y lo mantuvieras hasta hoy, tendrías ${formatMoney(tracked, "ARS", { magnitude: true })}.`,
+  official_usd: (cost, tracked) =>
+    `Comprar dólar oficial habría dejado ${formatMoney(tracked, "ARS", { magnitude: true })} en ARS hoy (asumiendo acceso al oficial — irreal en muchos casos).`,
+  plazo_fijo: (cost, tracked) =>
+    `Plazo fijo tradicional: capitalización diaria con la tasa promedio del BCRA. Hoy serían ${formatMoney(tracked, "ARS", { magnitude: true })}.`,
+  inflation: (cost, tracked) =>
+    `Si tus pesos hubieran solo seguido la inflación (poder de compra), hoy serían ${formatMoney(tracked, "ARS", { magnitude: true })}. Esto es el piso real, no una inversión.`
+};
+
+// Internal store of ad-hoc indicators the user added during the session.
+// Persisted to localStorage so a refresh doesn't wipe their work.
+const CUSTOM_BENCHMARKS_KEY = "marketBotCustomBenchmarks";
+function loadCustomBenchmarks() {
+  try {
+    const raw = window.localStorage.getItem(CUSTOM_BENCHMARKS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (err) {
+    return [];
+  }
+}
+function saveCustomBenchmarks(list) {
+  try {
+    window.localStorage.setItem(CUSTOM_BENCHMARKS_KEY, JSON.stringify(list));
+  } catch (err) {}
+}
+
 function renderBenchmarkBars(summary) {
   if (!elements.benchmarkPanel || !elements.benchmarkBars) return;
 
@@ -1312,95 +1706,296 @@ function renderBenchmarkBars(summary) {
     return;
   }
 
-  // Aggregate tracked_value_ars per benchmark label across positions, and sum outperformance to derive a portfolio-level pct.
+  // ---- Opportunity-cost framing ----
+  // "Pusiste X plata hace Y días en promedio. Hoy tendrías Z en cada alternativa."
+  // Aggregate per-benchmark tracked value so we can rank by what would have
+  // been the best parking spot for the user's pesos.
   const aggregates = new Map();
-  let portfolioInvestedArs = 0;
-
   summary.positions.forEach((position) => {
     const comparisons = Array.isArray(position.benchmark_comparisons) ? position.benchmark_comparisons : [];
     comparisons.forEach((cmp) => {
       if (!cmp || typeof cmp.tracked_value_ars !== "number") return;
-      const entry = aggregates.get(cmp.label) || { trackedArs: 0, outArs: 0 };
+      const entry = aggregates.get(cmp.label) || { trackedArs: 0 };
       entry.trackedArs += cmp.tracked_value_ars;
-      entry.outArs += typeof cmp.outperformance_ars === "number" ? cmp.outperformance_ars : 0;
       aggregates.set(cmp.label, entry);
     });
   });
 
-  // Portfolio value = average benchmark tracked + outperformance won't be exact across all benchmarks; instead use total_value_ars.
-  const portfolioArs = typeof summary.total_value_ars === "number" ? summary.total_value_ars : 0;
+  const portfolioArs = Number(summary.total_value_ars) || 0;
+  const portfolioUsd = Number(summary.total_value_usd) || 0;
+  const costArs = Number(summary.total_cost_ars) || 0;
+  const costUsd = Number(summary.total_cost_usd) || 0;
+  const pnlArs = Number(summary.total_pnl_ars) || 0;
+  const portfolioReturnPct = costArs > 0 ? pnlArs / costArs : 0;
 
+  // Compute average holding days + first/last purchase from position metadata.
+  const today = new Date();
+  let totalDays = 0;
+  let firstDate = null;
+  let lastDate = null;
+  summary.positions.forEach((position) => {
+    const purchased = new Date(`${position.purchase_date}T00:00:00`);
+    if (Number.isNaN(purchased.getTime())) return;
+    const days = Math.max(0, (today - purchased) / (1000 * 60 * 60 * 24));
+    totalDays += days;
+    if (!firstDate || purchased < firstDate) firstDate = purchased;
+    if (!lastDate || purchased > lastDate) lastDate = purchased;
+  });
+  const avgDays = summary.positions.length ? totalDays / summary.positions.length : 0;
+
+  const formatLocalDate = (d) => {
+    if (!d || Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" });
+  };
+
+  // Build comparison rows. Portfolio sits at top as the user's actual result.
+  // Below it, every benchmark = the "what if" value the user could have had.
   const benchmarkRows = Array.from(aggregates.entries())
     .filter(([label]) => BENCHMARK_LABELS[label])
     .map(([label, value]) => {
       const trackedArs = value.trackedArs;
-      const outArs = portfolioArs - trackedArs;
-      const outPct = trackedArs !== 0 ? outArs / Math.abs(trackedArs) : 0;
+      const deltaVsCost = costArs > 0 ? trackedArs / costArs - 1 : 0;
       return {
         key: label,
         label: BENCHMARK_LABELS[label],
         valueArs: trackedArs,
-        deltaArs: outArs,
-        outperformancePct: outPct,
-        tone: outArs >= 0 ? "bull" : "bear"
+        deltaPct: deltaVsCost,
+        deltaArs: trackedArs - costArs,
+        tone: deltaVsCost >= 0 ? "bull" : "bear",
+        narrative: BENCHMARK_NARRATIVES[label] ? BENCHMARK_NARRATIVES[label](costArs, trackedArs) : null
       };
     })
-    .sort((left, right) => right.outperformancePct - left.outperformancePct);
+    .sort((a, b) => b.valueArs - a.valueArs);
+
+  // Inject custom user-added benchmarks (loaded from localStorage). Each one
+  // will be enriched async via a backend call — render the placeholder first.
+  const customs = loadCustomBenchmarks();
+  const customRows = customs.map((c) => ({
+    key: `__custom__${c.ticker}`,
+    label: c.label || c.ticker,
+    valueArs: c.trackedArs ?? null,
+    deltaPct: c.deltaPct ?? null,
+    deltaArs: c.deltaArs ?? null,
+    tone: c.deltaPct == null ? "anchor" : (c.deltaPct >= 0 ? "bull" : "bear"),
+    custom: true,
+    ticker: c.ticker,
+    pending: c.trackedArs == null
+  }));
+
+  const portfolioRow = {
+    key: "__portfolio",
+    label: "Tu portfolio (acciones)",
+    valueArs: portfolioArs,
+    deltaPct: portfolioReturnPct,
+    deltaArs: pnlArs,
+    tone: portfolioReturnPct >= 0 ? "bull" : "bear",
+    isPortfolio: true,
+    narrative: BENCHMARK_NARRATIVES.__portfolio(costArs, portfolioArs, portfolioReturnPct)
+  };
+
+  // Render order: PORTFOLIO first (it's the actual result), then alternatives
+  // ranked by hypothetical value descending so the user sees "best parking spot
+  // first" → "what you actually did" at a glance.
+  const allRows = [portfolioRow, ...benchmarkRows, ...customRows];
+  const maxAbs = allRows.reduce((m, r) => Math.max(m, Math.abs(Number(r.valueArs) || 0)), 1);
 
   elements.benchmarkPanel.classList.remove("is-hidden");
+
+  const rowsHtml = allRows.map((row) => renderOpportunityRow(row, maxAbs, costArs)).join("");
+
   elements.benchmarkBars.innerHTML = `
-    <article class="benchmark-spotlight">
-      <div>
-        <p class="analysis-kicker">Mi portfolio</p>
-        <h4>Valor actual consolidado</h4>
+    <article class="opportunity-origin">
+      <div class="opportunity-origin-main">
+        <p class="analysis-kicker">Punto de partida</p>
+        <h3 class="opportunity-origin-value">${formatMoney(costArs, "ARS", { magnitude: true })}</h3>
+        <p class="opportunity-origin-meta">
+          <span class="opportunity-origin-chip">${summary.positions_count} posiciones</span>
+          <span class="opportunity-origin-divider" aria-hidden="true">·</span>
+          <span>Promedio <strong>${Math.round(avgDays)} días</strong> en cartera</span>
+          <span class="opportunity-origin-divider" aria-hidden="true">·</span>
+          <span>${formatLocalDate(firstDate)} → ${formatLocalDate(lastDate)}</span>
+        </p>
       </div>
-      <div class="benchmark-spotlight-value">${formatCurrency(portfolioArs, "ARS")}</div>
-      <p class="benchmark-spotlight-copy">Tomamos este valor como base para comparar cuánto le gana o pierde tu cartera frente a cada benchmark argentino.</p>
+      <div class="opportunity-origin-aside">
+        <span class="opportunity-origin-aside-label">Equivalente en USD invertido (a la fecha de cada compra)</span>
+        <strong class="opportunity-origin-aside-value">${formatMoney(costUsd, "USD")}</strong>
+      </div>
     </article>
-    <div class="benchmark-comparison-grid">
-      ${benchmarkRows
-    .map((row) => {
-      const pairMax = Math.max(Math.abs(row.valueArs), Math.abs(portfolioArs), 1);
-      const benchmarkWidth = Math.max(12, (Math.abs(row.valueArs) / pairMax) * 100);
-      const portfolioWidth = Math.max(12, (Math.abs(portfolioArs) / pairMax) * 100);
-      const toneLabel = row.tone === "bull" ? "Le gana" : "Pierde";
-      const deltaCopy = row.deltaArs >= 0
-        ? `Tu portfolio le gana por ${formatCurrency(Math.abs(row.deltaArs), "ARS")}.`
-        : `Tu portfolio queda abajo por ${formatCurrency(Math.abs(row.deltaArs), "ARS")}.`;
-      return `
-        <article class="benchmark-card ${row.tone}" data-row="${escapeText(row.key)}">
-          <div class="benchmark-card-top">
-            <span class="tone-chip">${escapeText(row.label)}</span>
-            <span class="benchmark-delta ${row.tone}">${formatPercent(row.outperformancePct)}</span>
-          </div>
-          <div class="benchmark-card-value">${formatCurrency(row.valueArs, "ARS")}</div>
-          <p class="benchmark-card-copy">${toneLabel} · ${deltaCopy}</p>
-          <div class="benchmark-meter-group">
-            <div class="benchmark-meter">
-              <div class="benchmark-meter-meta">
-                <span>Benchmark</span>
-                <strong>${formatCurrency(row.valueArs, "ARS")}</strong>
-              </div>
-              <div class="benchmark-meter-track" role="presentation">
-                <div class="benchmark-meter-fill benchmark" style="width:${benchmarkWidth.toFixed(2)}%"></div>
-              </div>
-            </div>
-            <div class="benchmark-meter">
-              <div class="benchmark-meter-meta">
-                <span>Portfolio</span>
-                <strong>${formatCurrency(portfolioArs, "ARS")}</strong>
-              </div>
-              <div class="benchmark-meter-track" role="presentation">
-                <div class="benchmark-meter-fill portfolio ${row.tone}" style="width:${portfolioWidth.toFixed(2)}%"></div>
-              </div>
-            </div>
-          </div>
-        </article>
-      `;
-    })
-    .join("")}
-    </div>
+
+    <p class="opportunity-section-kicker">Cuánto tendrías hoy según qué hiciste con esos pesos</p>
+    <ul class="opportunity-rows" role="list">
+      ${rowsHtml}
+    </ul>
+
+    <article class="opportunity-custom-add" data-custom-state="idle">
+      <div class="opportunity-custom-prompt">
+        <span class="opportunity-custom-glyph" aria-hidden="true">🎯</span>
+        <div>
+          <p class="analysis-kicker">Sumá un benchmark custom</p>
+          <p class="opportunity-custom-copy">¿Te preguntás qué hubiera pasado si en vez de tus acciones comprabas SPY, un FCI o cualquier otro ticker? Cargá el símbolo y lo agregamos a la comparación con la misma lógica (fecha de cada compra → valor actual).</p>
+        </div>
+      </div>
+      <form class="opportunity-custom-form" id="opportunity-custom-form">
+        <label class="opportunity-custom-field">
+          <span class="metric-label">Ticker (US)</span>
+          <input
+            type="text"
+            id="opportunity-custom-input"
+            class="opportunity-custom-input"
+            placeholder="SPY · VOO · BTC-USD · XAUUSD=X"
+            maxlength="14"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </label>
+        <button type="submit" class="primary-button opportunity-custom-submit">
+          <span class="button-label">Agregar</span>
+        </button>
+      </form>
+      <p class="opportunity-custom-hint" id="opportunity-custom-hint"></p>
+    </article>
   `;
+
+  attachOpportunityRowHandlers();
+}
+
+function renderOpportunityRow(row, maxAbs, costArs) {
+  const widthPct = row.pending
+    ? 6
+    : Math.max(3, (Math.abs(Number(row.valueArs) || 0) / Math.max(1, maxAbs)) * 100);
+  const glyph = row.custom
+    ? BENCHMARK_GLYPHS.__custom
+    : (BENCHMARK_GLYPHS[row.key] || "💠");
+  const deltaLabel = row.pending
+    ? "Calculando…"
+    : formatPercent(row.deltaPct || 0, { signed: true });
+  const deltaArsLabel = row.pending
+    ? ""
+    : `${row.deltaArs >= 0 ? "+" : "−"}${formatMoney(Math.abs(row.deltaArs), "ARS", { magnitude: true }).replace(/^-/, "").trim()}`;
+  const valueLabel = row.pending
+    ? "—"
+    : formatMoney(row.valueArs, "ARS", { magnitude: true });
+
+  // Detail panel shown when the row is expanded — uses grid-template-rows
+  // 0fr → 1fr tween for a buttery card-resize feel (transitions.dev).
+  const detailHtml = row.pending
+    ? `<p class="opportunity-detail-pending">Estamos pidiéndole los precios históricos a yfinance. Si el ticker existe, en unos segundos vas a ver la comparativa.</p>`
+    : `
+      <div class="opportunity-detail-grid">
+        <div class="opportunity-detail-tile">
+          <span class="metric-label">Plata original</span>
+          <strong>${formatMoney(costArs, "ARS")}</strong>
+        </div>
+        <div class="opportunity-detail-tile">
+          <span class="metric-label">Valor hipotético hoy</span>
+          <strong>${formatMoney(row.valueArs, "ARS")}</strong>
+        </div>
+        <div class="opportunity-detail-tile">
+          <span class="metric-label">Diferencia</span>
+          <strong class="tone-${row.tone}">${deltaArsLabel}</strong>
+        </div>
+        <div class="opportunity-detail-tile">
+          <span class="metric-label">Rendimiento</span>
+          <strong class="tone-${row.tone}">${deltaLabel}</strong>
+        </div>
+      </div>
+      ${row.narrative ? `<p class="opportunity-detail-narrative">${escapeText(row.narrative)}</p>` : ""}
+    `;
+
+  return `
+    <li class="opportunity-row tone-${row.tone} ${row.isPortfolio ? "is-portfolio" : ""} ${row.custom ? "is-custom" : ""}"
+        data-key="${escapeText(row.key)}"
+        data-expanded="false">
+      <button type="button" class="opportunity-row-trigger" aria-expanded="false">
+        <span class="opportunity-row-glyph" aria-hidden="true">${glyph}</span>
+        <span class="opportunity-row-label">${escapeText(row.label)}</span>
+        <span class="opportunity-row-value">${valueLabel}</span>
+        <span class="opportunity-row-delta tone-${row.tone}">${escapeText(deltaLabel)}</span>
+        <span class="opportunity-row-chevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="opportunity-row-track" role="presentation">
+        <div class="opportunity-row-fill tone-${row.tone}" style="width:${widthPct.toFixed(2)}%"></div>
+      </div>
+      <div class="opportunity-row-detail">
+        <div class="opportunity-row-detail-inner">
+          ${detailHtml}
+          ${row.custom && !row.pending ? `<button type="button" class="ghost-button opportunity-remove" data-remove-custom="${escapeText(row.ticker)}">Quitar</button>` : ""}
+        </div>
+      </div>
+    </li>
+  `;
+}
+
+function attachOpportunityRowHandlers() {
+  document.querySelectorAll(".opportunity-row-trigger").forEach((trigger) => {
+    trigger.addEventListener("click", () => {
+      const row = trigger.closest(".opportunity-row");
+      const expanded = row.dataset.expanded === "true";
+      row.dataset.expanded = expanded ? "false" : "true";
+      trigger.setAttribute("aria-expanded", expanded ? "false" : "true");
+    });
+  });
+  document.querySelectorAll(".opportunity-remove").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const ticker = btn.dataset.removeCustom;
+      const current = loadCustomBenchmarks().filter((c) => c.ticker !== ticker);
+      saveCustomBenchmarks(current);
+      if (state.portfolioSummary) renderBenchmarkBars(state.portfolioSummary);
+    });
+  });
+  const form = document.getElementById("opportunity-custom-form");
+  if (form) {
+    form.addEventListener("submit", handleOpportunityCustomSubmit);
+  }
+}
+
+async function handleOpportunityCustomSubmit(event) {
+  event.preventDefault();
+  const input = document.getElementById("opportunity-custom-input");
+  const hint = document.getElementById("opportunity-custom-hint");
+  const ticker = (input.value || "").trim().toUpperCase();
+  if (!ticker) {
+    if (hint) hint.textContent = "Cargá un ticker primero (ej: SPY, VOO, BTC-USD).";
+    return;
+  }
+
+  const existing = loadCustomBenchmarks();
+  if (existing.some((c) => c.ticker === ticker)) {
+    if (hint) hint.textContent = `${ticker} ya está en la comparación.`;
+    return;
+  }
+
+  // Insert pending placeholder first so the user sees feedback immediately.
+  const next = [...existing, { ticker, label: ticker, trackedArs: null, deltaPct: null, deltaArs: null }];
+  saveCustomBenchmarks(next);
+  if (hint) hint.textContent = `Buscando ${ticker}…`;
+  input.value = "";
+  if (state.portfolioSummary) renderBenchmarkBars(state.portfolioSummary);
+
+  try {
+    const data = await fetchJson(`/portfolio/benchmarks/custom?ticker=${encodeURIComponent(ticker)}`, { auth: true });
+    const updated = loadCustomBenchmarks().map((c) =>
+      c.ticker === ticker
+        ? {
+            ticker,
+            label: data.label || ticker,
+            trackedArs: data.tracked_value_ars,
+            deltaPct: data.outperformance_pct,
+            deltaArs: data.outperformance_ars
+          }
+        : c
+    );
+    saveCustomBenchmarks(updated);
+    if (hint) hint.textContent = `${ticker} agregado. Clickeá para ver el detalle.`;
+  } catch (error) {
+    // Strip the failed pending row so the user can try again.
+    const cleaned = loadCustomBenchmarks().filter((c) => c.ticker !== ticker);
+    saveCustomBenchmarks(cleaned);
+    if (hint) hint.textContent = `No se pudo agregar ${ticker}: ${error.message}`;
+  } finally {
+    if (state.portfolioSummary) renderBenchmarkBars(state.portfolioSummary);
+  }
 }
 
 function renderPortfolioEarningsLocked() {
@@ -1429,6 +2024,142 @@ function renderPortfolioEarningsError(message) {
     body: message,
     tone: "error"
   });
+}
+
+// Earnings banner — sticky alert when the user has reports within the next 48h
+// in tickers they hold or watch. Persists dismissal per-event in localStorage
+// so closing it once doesn't make it reappear on every refresh, but a *new*
+// upcoming event still surfaces.
+const EARNINGS_BANNER_DISMISS_KEY = "marketBotEarningsBannerDismissed";
+
+function dismissedEarningsKeys() {
+  try {
+    const raw = window.localStorage.getItem(EARNINGS_BANNER_DISMISS_KEY);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw));
+  } catch (err) {
+    return new Set();
+  }
+}
+
+function rememberDismissedEarning(key) {
+  try {
+    const current = dismissedEarningsKeys();
+    current.add(key);
+    window.localStorage.setItem(
+      EARNINGS_BANNER_DISMISS_KEY,
+      JSON.stringify(Array.from(current))
+    );
+  } catch (err) {
+    // localStorage blocked — fine, user will see the banner again next time.
+  }
+}
+
+function eventDismissKey(event) {
+  return `${event.ticker}::${event.report_date}::${event.report_time || ""}`;
+}
+
+function describeEarningsCountdown(event) {
+  // Best-effort: most events come with a date but ambiguous TZ. We anchor to
+  // local midnight of the report_date and use the report_time string only
+  // as a label, not for math.
+  if (!event.report_date) return null;
+  const target = new Date(`${event.report_date}T16:30:00-04:00`); // approx after-hours NY
+  if (Number.isNaN(target.getTime())) return null;
+  const now = new Date();
+  const diffMs = target.getTime() - now.getTime();
+  const diffHours = diffMs / (1000 * 60 * 60);
+  return { target, diffHours };
+}
+
+async function refreshEarningsBanner(positionsSymbols) {
+  if (!elements.earningsBanner) return;
+  if (!state.accessToken) {
+    elements.earningsBanner.classList.add("is-hidden");
+    return;
+  }
+
+  try {
+    const events = await fetchJson("/earnings/upcoming?days_ahead=7", { auth: true });
+    if (!Array.isArray(events) || !events.length) {
+      elements.earningsBanner.classList.add("is-hidden");
+      return;
+    }
+
+    const heldSet = new Set((positionsSymbols || []).map((s) => String(s).toUpperCase()));
+    const dismissed = dismissedEarningsKeys();
+
+    // Prioritize: held tickers first, then any upcoming. Drop anything > 48h.
+    const annotated = events
+      .map((event) => {
+        const countdown = describeEarningsCountdown(event);
+        return countdown ? { event, ...countdown } : null;
+      })
+      .filter(
+        (item) =>
+          item &&
+          item.diffHours > -8 &&
+          item.diffHours < 48 &&
+          !dismissed.has(eventDismissKey(item.event))
+      )
+      .sort((a, b) => {
+        const aHeld = heldSet.has(a.event.ticker.toUpperCase()) ? 1 : 0;
+        const bHeld = heldSet.has(b.event.ticker.toUpperCase()) ? 1 : 0;
+        if (aHeld !== bHeld) return bHeld - aHeld;
+        return a.diffHours - b.diffHours;
+      });
+
+    if (!annotated.length) {
+      elements.earningsBanner.classList.add("is-hidden");
+      return;
+    }
+
+    const next = annotated[0];
+    const { event, diffHours } = next;
+    const isHeld = heldSet.has(event.ticker.toUpperCase());
+    const countdownLabel = formatEarningsCountdown(diffHours);
+    const reportTime = event.report_time ? ` · ${event.report_time}` : "";
+    const positionTag = isHeld
+      ? `<span class="earnings-banner-position is-held">Tenés esta posición</span>`
+      : `<span class="earnings-banner-position">No tenés posición</span>`;
+
+    elements.earningsBannerMessage.innerHTML = `
+      <strong>${escapeText(event.ticker)}</strong>
+      reporta <span class="earnings-banner-when">${escapeText(countdownLabel)}</span>${escapeText(reportTime)}
+      ${positionTag}
+      ${
+        annotated.length > 1
+          ? `<span class="earnings-banner-more">+${annotated.length - 1} evento${annotated.length > 2 ? "s" : ""} más en las próximas 48h</span>`
+          : ""
+      }
+    `;
+
+    elements.earningsBanner.dataset.bannerKey = eventDismissKey(event);
+    elements.earningsBanner.dataset.bannerTicker = event.ticker;
+    elements.earningsBanner.classList.toggle("is-held", isHeld);
+    elements.earningsBanner.classList.remove("is-hidden");
+  } catch (error) {
+    // Soft fail: the banner is enhancement, never block the rest of the UI.
+    elements.earningsBanner.classList.add("is-hidden");
+  }
+}
+
+function formatEarningsCountdown(diffHours) {
+  if (diffHours < 0) {
+    return `hoy (cerrado hace ${Math.abs(Math.round(diffHours))}h)`;
+  }
+  if (diffHours < 1) {
+    const minutes = Math.max(1, Math.round(diffHours * 60));
+    return `en ${minutes}min`;
+  }
+  if (diffHours < 24) {
+    const hours = Math.floor(diffHours);
+    const mins = Math.round((diffHours - hours) * 60);
+    return mins > 0 ? `en ${hours}h ${mins}min` : `en ${hours}h`;
+  }
+  const days = Math.floor(diffHours / 24);
+  const hours = Math.round(diffHours - days * 24);
+  return hours > 0 ? `en ${days}d ${hours}h` : `en ${days}d`;
 }
 
 async function loadPortfolioEarningsWatch() {
@@ -1583,19 +2314,91 @@ async function loadUniverse() {
 }
 
 async function loadRankings() {
-  const rankings = await fetchJson(`/rankings?horizon=${state.horizon}&limit=6&cedear_only=true`, {
+  const mode = state.rankingMode === "opportunities" ? "opportunities" : "default";
+  const url = `/rankings?horizon=${state.horizon}&limit=6&cedear_only=true&mode=${mode}`;
+  const rankings = await fetchJson(url, {
     auth: Boolean(state.accessToken)
   });
   state.radarItems = rankings;
   renderRadar();
 
   if (!rankings.length) {
-    setStatus("No hay rankings disponibles para el horizonte seleccionado.");
+    setStatus(
+      mode === "opportunities"
+        ? "No hay oportunidades activas ahora (catalysts/volúmen/volatilidad bajos). Probá el ranking completo."
+        : "No hay rankings disponibles para el horizonte seleccionado."
+    );
     return;
   }
 
   if (!rankings.some((item) => item.ticker === state.ticker)) {
     state.ticker = rankings[0].ticker;
+  }
+}
+
+function setRankingMode(mode) {
+  const normalized = mode === "opportunities" ? "opportunities" : "default";
+  if (state.rankingMode === normalized) return;
+  state.rankingMode = normalized;
+  try {
+    window.localStorage.setItem("marketBotRankingMode", normalized);
+  } catch (err) {
+    // localStorage can be blocked in private mode — ignore, mode just won't persist.
+  }
+  syncRankingModeButtons();
+  loadRankings().catch((error) => {
+    setStatus(`No se pudo recargar el ranking: ${error.message}`);
+  });
+}
+
+function syncRankingModeButtons() {
+  if (!elements.rankingModeButtons || !elements.rankingModeButtons.length) return;
+  elements.rankingModeButtons.forEach((button) => {
+    const isSelected = button.dataset.rankingMode === state.rankingMode;
+    button.classList.toggle("is-selected", isSelected);
+    button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+  });
+}
+
+async function refreshFxDiagnostic(summary) {
+  if (!elements.fxDiagnosticTile) return;
+
+  // Only show the tile if the user actually has positions — otherwise the
+  // numbers are meaningless and it just adds noise to the empty state.
+  if (!summary || !summary.positions_count) {
+    elements.fxDiagnosticTile.classList.add("is-hidden");
+    return;
+  }
+
+  try {
+    const rates = await fetchJson("/benchmarks/current");
+    state.currentFx = rates;
+    const preference = (state.profile && state.profile.benchmark_preference) || "mep";
+    const formatter = new Intl.NumberFormat("es-AR", { maximumFractionDigits: 1 });
+
+    elements.fxDiagnosticTile.classList.remove("is-hidden");
+    elements.fxDiagnosticSource.textContent = preference.toUpperCase();
+    elements.fxDiagnosticCcl.textContent = rates.ccl ? `$${formatter.format(rates.ccl)}` : "—";
+    elements.fxDiagnosticMep.textContent = rates.mep ? `$${formatter.format(rates.mep)}` : "—";
+    elements.fxDiagnosticOfficial.textContent = rates.official
+      ? `$${formatter.format(rates.official)}`
+      : "—";
+
+    const valorArs = Number(summary.total_value_ars) || 0;
+    const valorUsd = Number(summary.total_value_usd) || 0;
+    if (valorUsd > 0 && valorArs > 0) {
+      const implied = valorArs / valorUsd;
+      const drift = rates.ccl ? Math.abs(implied - rates.ccl) / rates.ccl : 0;
+      elements.fxDiagnosticImplied.textContent = `$${formatter.format(implied)}`;
+      elements.fxDiagnosticImplied.classList.toggle("is-warning", drift > 0.25);
+    } else {
+      elements.fxDiagnosticImplied.textContent = "—";
+      elements.fxDiagnosticImplied.classList.remove("is-warning");
+    }
+  } catch (error) {
+    // Soft-fail: hide the tile if we can't fetch FX. We don't want to break
+    // the portfolio view just because the benchmark service is offline.
+    elements.fxDiagnosticTile.classList.add("is-hidden");
   }
 }
 
@@ -1811,15 +2614,15 @@ function renderAnalysis(analysis) {
 
 function renderMarketOverview(overview) {
   const regimeLabel = overview.regime === "risk_on"
-    ? "Risk on"
+    ? "Contexto favorable"
     : overview.regime === "risk_off"
-      ? "Risk off"
-      : "Mixed";
+      ? "Contexto defensivo"
+      : "Contexto mixto";
   const breadthLabel = overview.breadth ? `Breadth ${toHeadline(overview.breadth)}` : "Breadth n/d";
 
-  elements.marketOverviewTitle.textContent = `Tape general ${regimeLabel}`;
+  elements.marketOverviewTitle.textContent = regimeLabel;
   elements.marketOverviewChip.textContent = breadthLabel;
-  elements.marketOverviewSummary.textContent = overview.summary;
+  elements.marketOverviewSummary.textContent = `${overview.summary} Leé estas cards como semáforos del contexto: si predominan señales constructivas, el mercado acompaña más; si predominan las de presión, conviene pedir más confirmación.`;
 
   if (!Array.isArray(overview.instruments) || !overview.instruments.length) {
     renderContextPlaceholder(elements.marketOverviewGrid, {
@@ -1848,6 +2651,24 @@ function renderMarketOverviewError(message) {
     tone: "error"
   });
   elements.marketOverviewWarnings.innerHTML = "<li>Sin lectura macro por error de datos.</li>";
+}
+
+function marketCategoryLabel(category) {
+  const labels = {
+    indices: "Indices",
+    breadth: "Amplitud",
+    volatility: "Volatilidad",
+    crypto: "Cripto",
+    macro: "Macro",
+    rates: "Tasas"
+  };
+  return labels[category] || toHeadline(category || "general");
+}
+
+function marketToneLabel(tone) {
+  if (tone === "bull") return "Acompaña";
+  if (tone === "bear") return "Presiona";
+  return "Mixto";
 }
 
 function primeContextLoading(ticker) {
@@ -2011,16 +2832,68 @@ function colorForScenario(label) {
   return "#8a6f3c";
 }
 
-function formatCurrency(value, currency) {
-  return new Intl.NumberFormat("es-AR", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: currency === "ARS" ? 0 : 2
-  }).format(value);
+// Money formatter with explicit prefix so ARS and USD read uniformly across
+// the UI. Intl's "es-AR" returns "$" for ARS and "US$" for USD, which mixes
+// implicit and explicit currency cues. We force "AR$" / "US$" everywhere and
+// optionally compact magnitudes (12.34M, 9,8k) for hero numbers that would
+// otherwise overflow the layout.
+function formatMoney(value, currency, options = {}) {
+  const { magnitude = false, signed = false, fractionDigits } = options;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "—";
+
+  const prefix = currency === "ARS" ? "AR$" : currency === "USD" ? "US$" : "";
+  const sign = numeric < 0 ? "−" : signed ? "+" : "";
+  const abs = Math.abs(numeric);
+
+  if (magnitude) {
+    let formatted;
+    if (abs >= 1_000_000) {
+      formatted = `${(abs / 1_000_000).toLocaleString("es-AR", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      })} M`;
+    } else if (abs >= 1_000) {
+      formatted = `${(abs / 1_000).toLocaleString("es-AR", {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1
+      })} k`;
+    } else {
+      formatted = abs.toLocaleString("es-AR", {
+        minimumFractionDigits: currency === "ARS" ? 0 : 2,
+        maximumFractionDigits: currency === "ARS" ? 0 : 2
+      });
+    }
+    return `${sign}${prefix} ${formatted}`.trim();
+  }
+
+  const digits = fractionDigits ?? (currency === "ARS" ? 0 : 2);
+  const formatted = abs.toLocaleString("es-AR", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits
+  });
+  return `${sign}${prefix} ${formatted}`.trim();
 }
 
-function formatPercent(value) {
-  return `${(value * 100).toFixed(2)}%`;
+// Back-compat shim — keeps existing call sites working until they migrate
+// to formatMoney directly. Old code expected no sign on negatives, but the
+// new shim shows a typographic minus on negatives (matches the rest of the UI).
+function formatCurrency(value, currency) {
+  return formatMoney(value, currency);
+}
+
+function formatPercent(value, { signed = false } = {}) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "—";
+  const pct = numeric * 100;
+  const sign = pct < 0 ? "−" : signed ? "+" : "";
+  return `${sign}${Math.abs(pct).toFixed(2).replace(".", ",")}%`;
+}
+
+function toneOf(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric === 0) return "neutral";
+  return numeric > 0 ? "bull" : "bear";
 }
 
 function formatMacroValue(symbol, value) {
@@ -2127,30 +3000,40 @@ function renderNewsCard(item) {
 
 function renderMarketPulseCard(item) {
   const sma20 = item.relative_to_sma20_pct !== null && item.relative_to_sma20_pct !== undefined
-    ? formatPercent(item.relative_to_sma20_pct)
+    ? formatPercent(item.relative_to_sma20_pct, { signed: true })
     : "n/d";
   const sma50 = item.relative_to_sma50_pct !== null && item.relative_to_sma50_pct !== undefined
-    ? formatPercent(item.relative_to_sma50_pct)
+    ? formatPercent(item.relative_to_sma50_pct, { signed: true })
     : "n/d";
-  const toneLabel = item.tone === "bull" ? "Constructivo" : item.tone === "bear" ? "Presión" : "Mixto";
+  const toneLabel = marketToneLabel(item.tone);
+  const categoryLabel = marketCategoryLabel(item.category);
   return `
     <article class="market-pulse-card ${escapeText(item.tone || "neutral")}">
-      <div class="context-card-top">
-        <span class="tone-chip">${escapeText(item.category)}</span>
+      <div class="context-card-top market-card-top">
+        <span class="tone-chip">${escapeText(categoryLabel)}</span>
         <span class="signal-chip ${escapeText(item.tone || "neutral")}">${toneLabel}</span>
       </div>
       <h4>${escapeText(item.label)}</h4>
-      <p>${escapeText(item.note)}</p>
-      <div class="context-meta">
-        <span>Precio ${formatMacroValue(item.symbol, item.price)}</span>
-        <span>Día ${formatPercent(item.day_change_pct)}</span>
-        <span>vs SMA20 ${sma20}</span>
+      <p class="market-pulse-copy">${escapeText(item.note)}</p>
+      <div class="market-pulse-metrics">
+        <div class="market-pulse-metric">
+          <span class="metric-label">Precio</span>
+          <strong>${formatMacroValue(item.symbol, item.price)}</strong>
+        </div>
+        <div class="market-pulse-metric">
+          <span class="metric-label">Día</span>
+          <strong class="tone-${toneOf(item.day_change_pct)}">${formatPercent(item.day_change_pct, { signed: true })}</strong>
+        </div>
+        <div class="market-pulse-metric">
+          <span class="metric-label">Vs media 20d</span>
+          <strong>${sma20}</strong>
+        </div>
+        <div class="market-pulse-metric">
+          <span class="metric-label">Vs media 50d</span>
+          <strong>${sma50}</strong>
+        </div>
       </div>
-      <div class="context-meta">
-        <span>Símbolo ${escapeText(item.symbol)}</span>
-        <span>vs SMA50 ${sma50}</span>
-        <span>Tono ${toneLabel}</span>
-      </div>
+      <p class="market-pulse-footnote">Símbolo ${escapeText(item.symbol)} · Lectura ${toneLabel.toLowerCase()}.</p>
     </article>
   `;
 }
@@ -2249,6 +3132,31 @@ elements.instrumentButtons.forEach((button) => {
 elements.miniSummaryCurrencyButtons.forEach((button) => {
   button.addEventListener("click", () => setMiniSummaryCurrency(button.dataset.miniSummaryCurrency));
 });
+
+if (elements.rankingModeButtons && elements.rankingModeButtons.length) {
+  elements.rankingModeButtons.forEach((button) => {
+    button.addEventListener("click", () => setRankingMode(button.dataset.rankingMode));
+  });
+  syncRankingModeButtons();
+}
+
+if (elements.earningsBannerDismiss) {
+  elements.earningsBannerDismiss.addEventListener("click", () => {
+    const key = elements.earningsBanner.dataset.bannerKey;
+    if (key) rememberDismissedEarning(key);
+    elements.earningsBanner.classList.add("is-hidden");
+  });
+}
+
+if (elements.earningsBannerCta) {
+  elements.earningsBannerCta.addEventListener("click", () => {
+    // Drop the user into the analyzer for the ticker with the imminent event.
+    const ticker = elements.earningsBanner.dataset.bannerTicker;
+    if (!ticker) return;
+    setSurface("workspace");
+    analyzeTicker(ticker);
+  });
+}
 
 elements.horizonButtons.forEach((button) => {
   button.addEventListener("click", async () => {

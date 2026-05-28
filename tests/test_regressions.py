@@ -134,8 +134,11 @@ def test_rankings_endpoint_accepts_three_tuple_and_exposes_why_for_you(
 
     captured: dict[str, object] = {}
 
-    def fake_rank_universe(horizon, tickers=None, limit=10, cedear_only=True, profile=None):
+    def fake_rank_universe(
+        horizon, tickers=None, limit=10, cedear_only=True, profile=None, mode="default"
+    ):
         captured["profile"] = profile
+        captured["mode"] = mode
         return [(_sample_analysis(), 88.4, ["Setup alcista alineado a tu perfil."])]
 
     monkeypatch.setattr(app_module.service, "rank_universe", fake_rank_universe)
@@ -452,3 +455,167 @@ def test_portfolio_valuation_uses_profile_risk_tolerance_for_earnings_guardrail(
 
     assert captured["risk_tolerance"] == "low"
     assert any("earnings pronto" in note for note in valuation.notes)
+
+
+def test_cedear_current_value_usd_uses_ccl_conversion_not_inferred_ratio(monkeypatch):
+    """Regression for the 25 ARS/USD bug: when the stored cedear_ratio is wrong
+    (or never inferred), the USD value used to balloon because we did
+    `(qty / ratio) × underlying_usd`. We now convert via current CCL, so the
+    USD figure stays in sync with what the user would actually receive when
+    dollarizing the ARS proceeds.
+    """
+
+    class FakeBenchmarkService:
+        def build_period_snapshot(self, start_date, end_date):
+            current = SimpleNamespace(official=900.0, mep=1180.0, ccl=1200.0)
+            purchase = SimpleNamespace(official=850.0, mep=1100.0, ccl=1120.0)
+            return SimpleNamespace(
+                current_exchange=current,
+                purchase_exchange=purchase,
+                inflation_factor=1.10,
+                fixed_term_factor=1.08,
+            )
+
+    service = PortfolioService(benchmark_service=FakeBenchmarkService())
+
+    # Local BYMA price 8485 ARS, underlying GOOGL 180 USD. If the stored ratio
+    # falls back to 1, the old formula would give 109 × 180 = 19,620 USD.
+    # The new formula gives 109 × 8485 / 1200 = 770.93 USD, which is what the
+    # user would actually receive selling the CEDEAR at parity.
+    def fake_close(symbol):
+        if symbol.endswith(".BA"):
+            return (8485.0, date.today())
+        return (180.0, date.today())
+
+    monkeypatch.setattr(service, "_latest_close", fake_close)
+
+    position = PositionRecord(
+        position_id=1,
+        user_id=1,
+        instrument_type="cedear",
+        symbol="GOOGL",
+        underlying_ticker="GOOGL",
+        byma_symbol="GOOGL.BA",
+        cedear_ratio=1.0,  # The bug case: ratio defaulted to 1.
+        cedear_ratio_source="fallback_default",
+        quantity=109,
+        purchase_date=date(2026, 1, 7),
+        purchase_price=8485.0,
+        purchase_currency="ARS",
+        notes="",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+
+    valuation = service._build_position_valuation(position, "ccl", risk_tolerance="medium")
+
+    # ARS value = 109 × 8485 = 924,865
+    assert valuation.current_value_ars == 924865.0
+    # USD value via CCL = 924,865 / 1200 ≈ 770.72
+    assert 760.0 < valuation.current_value_usd < 780.0
+    # The old buggy path would have given 19,620 USD — assert we're nowhere near that.
+    assert valuation.current_value_usd < 5000.0
+    # Implied FX between ARS and USD figures should match the CCL we used.
+    implied_fx = valuation.current_value_ars / valuation.current_value_usd
+    assert 1190 < implied_fx < 1210
+
+
+def test_catalyst_boost_lifts_score_for_fresh_earnings():
+    """Regression for the "SNOW reported and didn't appear in ranking" complaint.
+
+    A ticker with a fresh REPORTED earnings catalyst should outrank an
+    otherwise-identical ticker without one. The boost has to be visible in the
+    final score so the top-N cut surfaces the mover."""
+    from market_bot.strategies.policy import adjust_rank_for_catalysts
+
+    fresh = _sample_analysis()
+    fresh.catalysts = [
+        Catalyst(
+            name="SNOW Q1 beat expectations",
+            category="earnings",
+            impact="positive",
+            status=CatalystStatus.REPORTED,
+            observed_at=datetime.utcnow(),
+        )
+    ]
+    quiet = _sample_analysis()
+    quiet.catalysts = []
+
+    fresh_score, fresh_reasons = adjust_rank_for_catalysts(70.0, fresh)
+    quiet_score, _ = adjust_rank_for_catalysts(70.0, quiet)
+
+    assert fresh_score > quiet_score
+    assert fresh_score / quiet_score >= 1.15
+    assert any("fresca" in reason.lower() or "catalyst" in reason.lower() for reason in fresh_reasons)
+
+
+def test_opportunity_filter_drops_quiet_megacap_keeps_news_driven_name():
+    """Opportunities mode should filter out names that have no live catalyst,
+    no volume spike, no outsized volatility, no high conviction — i.e. tickers
+    drifting sideways. SNOW reporting today qualifies; SPY at 0.5% ATR doesn't.
+    """
+    from market_bot.strategies.policy import is_opportunity_candidate
+
+    sleepy = _sample_analysis()
+    sleepy.catalysts = []
+    sleepy.indicators.atr = 0.5
+    sleepy.indicators.volume_ratio = 0.9
+    sleepy.probabilistic.confidence = 0.5
+
+    mover = _sample_analysis()
+    mover.catalysts = [
+        Catalyst(
+            name="Earnings beat",
+            category="earnings",
+            impact="positive",
+            status=CatalystStatus.CONFIRMED,
+        )
+    ]
+
+    assert is_opportunity_candidate(mover) is True
+    assert is_opportunity_candidate(sleepy) is False
+
+
+def test_rankings_endpoint_passes_mode_through_to_service(api_client, auth_headers, monkeypatch):
+    """The opportunities mode has to actually reach the engine — otherwise the
+    UI toggle is cosmetic. Capture the kwarg and assert it round-trips."""
+    import services.api.app as app_module
+
+    captured: dict[str, object] = {}
+
+    def fake_rank_universe(
+        horizon, tickers=None, limit=10, cedear_only=True, profile=None, mode="default"
+    ):
+        captured["mode"] = mode
+        return [(_sample_analysis(), 95.0, ["Catalyst confirmado."])]
+
+    monkeypatch.setattr(app_module.service, "rank_universe", fake_rank_universe)
+
+    response = api_client.get("/rankings?mode=opportunities", headers=auth_headers)
+    assert response.status_code == 200
+    assert captured["mode"] == "opportunities"
+
+    response = api_client.get("/rankings", headers=auth_headers)
+    assert response.status_code == 200
+    assert captured["mode"] == "default"
+
+    # Invalid mode should be rejected by pydantic pattern.
+    response = api_client.get("/rankings?mode=nonsense", headers=auth_headers)
+    assert response.status_code == 422
+
+
+def test_balanz_currency_normalizer_handles_accented_dolares():
+    """Regression for the Balanz importer dropping rows that listed currency
+    as "Dólares" (capital D with accent). The previous .lower() left the accent
+    in place, so `"dolar" in "dólares"` returned False and legitimate USD rows
+    were rejected as "Moneda no soportada"."""
+    from market_portfolio.balanz import _normalize_currency
+
+    assert _normalize_currency("Dólares") == "USD"
+    assert _normalize_currency("DÓLARES") == "USD"
+    assert _normalize_currency("dolares") == "USD"
+    assert _normalize_currency("Dólar Estadounidense") == "USD"
+    assert _normalize_currency("USD") == "USD"
+    assert _normalize_currency("Pesos") == "ARS"
+    assert _normalize_currency("Pesos Argentinos") == "ARS"
+    assert _normalize_currency("ARS") == "ARS"

@@ -19,8 +19,11 @@ from .models import generate_probabilistic_signal
 from .signals import generate_deterministic_signal
 from .strategies import (
     ProfileFilter,
+    adjust_rank_for_catalysts,
     adjust_rank_for_profile,
     compute_why_for_you,
+    is_index_bias_ticker,
+    is_opportunity_candidate,
     passes_profile_filter,
     rank_score,
     suggest_actions,
@@ -95,7 +98,20 @@ class MarketBotService:
         limit: int = 10,
         cedear_only: bool = True,
         profile: ProfileFilter | None = None,
+        mode: str = "default",
     ) -> list[tuple[TickerAnalysis, float, list[str]]]:
+        """Rank the universe with profile-aware filtering + catalyst-aware boosts.
+
+        ``mode`` controls how aggressively we surface "moving" names:
+
+        - ``"default"``: apply catalyst boost on top of the base score so SNOW-on-earnings
+          climbs above static mega-caps, but everything still appears.
+        - ``"opportunities"``: hard filter — only tickers with a live catalyst, a volume
+          spike, or outsized volatility survive. Index ETFs (SPY/QQQ/IBB) are dropped.
+          This is the mode for "find me something interesting today".
+        """
+        normalized_mode = mode if mode in {"default", "opportunities"} else "default"
+
         # Cache key includes profile so the same user gets a stable ranking.
         profile_key = (
             (profile.investor_profile, profile.risk_tolerance, profile.preferred_horizon, profile.preferred_instrument_types)
@@ -108,6 +124,7 @@ class MarketBotService:
             limit,
             cedear_only,
             profile_key,
+            normalized_mode,
         )
         cached = self._rankings_cache.get(cache_key)
         if cached is not None:
@@ -121,6 +138,10 @@ class MarketBotService:
         # Profile-driven instrument filter (e.g. cedear-only users skip pure stocks).
         if profile and profile.preferred_instrument_types == "cedear":
             universe = [ticker for ticker in universe if is_cedear_ticker(ticker)]
+        # In opportunities mode, drop the broad index ETFs up-front — the user
+        # is asking for movers, not market beta.
+        if normalized_mode == "opportunities":
+            universe = [t for t in universe if not is_index_bias_ticker(t)]
 
         if not universe:
             return self._rankings_cache.set(cache_key, [])
@@ -137,10 +158,20 @@ class MarketBotService:
                     continue
                 if profile and not passes_profile_filter(analysis, profile):
                     continue
+                if normalized_mode == "opportunities" and not is_opportunity_candidate(analysis):
+                    continue
                 base = rank_score(analysis.deterministic, analysis.probabilistic)
-                adjusted = adjust_rank_for_profile(base, analysis, profile) if profile else base
-                reasons = compute_why_for_you(analysis, profile) if profile else []
-                ranking.append((analysis, adjusted, reasons))
+                profile_adjusted = (
+                    adjust_rank_for_profile(base, analysis, profile) if profile else base
+                )
+                catalyst_adjusted, catalyst_reasons = adjust_rank_for_catalysts(
+                    profile_adjusted, analysis
+                )
+                profile_reasons = compute_why_for_you(analysis, profile) if profile else []
+                # Catalyst reasons go first so the user sees *why this jumped* before
+                # the profile rationalisation.
+                reasons = catalyst_reasons + profile_reasons
+                ranking.append((analysis, catalyst_adjusted, reasons[:4]))
 
         ranking.sort(key=lambda item: item[1], reverse=True)
         return self._rankings_cache.set(cache_key, ranking[:limit])

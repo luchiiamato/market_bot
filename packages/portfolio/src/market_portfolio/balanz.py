@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from io import BytesIO
@@ -307,9 +308,13 @@ def _date_value(value: object) -> date:
 
 def _normalize_currency(value: object) -> str:
     raw = str(value or "").strip().lower()
-    if "peso" in raw:
+    # Balanz exporta cosas como "Dólares" / "Pesos Argentinos". El .lower() no
+    # quita la tilde, así que "dolar" in "dólares" daba False y se descartaban
+    # filas USD legítimas. Normalizamos NFKD y removemos acentos.
+    raw = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii")
+    if "peso" in raw or raw in {"ars", "$"}:
         return "ARS"
-    if "dolar" in raw or "usd" in raw:
+    if "dolar" in raw or "usd" in raw or raw in {"us$", "u$s"}:
         return "USD"
     raise ValueError(f"Moneda no soportada en el extracto: {value}.")
 

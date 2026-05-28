@@ -8,7 +8,7 @@
     <title>Market Bot · Editorial Terminal</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260528-design3" />
     <script>
       // Pre-paint theme resolution to avoid FOUC.
       (function () {
@@ -65,6 +65,21 @@
           </button>
         </div>
       </div>
+
+      <aside class="earnings-banner is-hidden" id="earnings-banner" role="status" aria-live="polite">
+        <div class="earnings-banner-mark" aria-hidden="true">
+          <span class="earnings-banner-pulse"></span>
+        </div>
+        <div class="earnings-banner-content">
+          <p class="earnings-banner-kicker">Earnings window</p>
+          <p class="earnings-banner-message" id="earnings-banner-message">Sin eventos próximos.</p>
+        </div>
+        <div class="earnings-banner-actions">
+          <button type="button" class="ghost-button earnings-banner-cta" id="earnings-banner-cta">Ver detalle</button>
+          <button type="button" class="icon-button earnings-banner-dismiss" id="earnings-banner-dismiss" aria-label="Ocultar este aviso">×</button>
+        </div>
+      </aside>
+
       <header class="hero">
         <div class="hero-copy">
           <p class="eyebrow">Market Bot / Unified Analyzer</p>
@@ -180,7 +195,17 @@
                 <p class="panel-kicker">Landing / Top acciones</p>
                 <h2>Oportunidades para ir a buscar</h2>
               </div>
-              <p class="panel-caption">Clic para cargar un ejemplo en el analizador.</p>
+              <div class="radar-controls">
+                <div class="ranking-mode-switch" role="radiogroup" aria-label="Modo de ranking">
+                  <button type="button" class="ranking-mode-pill is-selected" data-ranking-mode="default" aria-pressed="true">
+                    Ranking completo
+                  </button>
+                  <button type="button" class="ranking-mode-pill" data-ranking-mode="opportunities" aria-pressed="false">
+                    Solo oportunidades
+                  </button>
+                </div>
+                <p class="panel-caption">Clic para cargar un ejemplo en el analizador.</p>
+              </div>
             </div>
             <div class="radar-grid" id="radar-grid"></div>
           </section>
@@ -328,22 +353,45 @@
                 <div class="portfolio-section-head">
                   <div>
                     <p class="analysis-kicker">Snapshot</p>
-                    <h3>Estado general del portfolio</h3>
+                    <h3>Estado del portfolio</h3>
                   </div>
-                  <p class="panel-caption">Métricas agregadas primero; benchmark después, sólo cuando ya hay algo que comparar.</p>
                 </div>
                 <div class="empty-state is-hidden" id="portfolio-empty-summary">
                   <strong>No hay nada precargado.</strong>
                   <p>Todavía no cargaste posiciones. Andá al tab <em>Cargar</em> para importar tu extracto o sumar una posición manualmente.</p>
                 </div>
+                <article class="fx-diagnostic-tile is-hidden" id="fx-diagnostic-tile" aria-live="polite">
+                  <div class="fx-diagnostic-head">
+                    <span class="analysis-kicker">Conversión activa</span>
+                    <span class="fx-diagnostic-pill" id="fx-diagnostic-source">CCL</span>
+                  </div>
+                  <div class="fx-diagnostic-grid">
+                    <div>
+                      <span class="metric-label">CCL hoy</span>
+                      <strong id="fx-diagnostic-ccl">—</strong>
+                    </div>
+                    <div>
+                      <span class="metric-label">MEP hoy</span>
+                      <strong id="fx-diagnostic-mep">—</strong>
+                    </div>
+                    <div>
+                      <span class="metric-label">Oficial hoy</span>
+                      <strong id="fx-diagnostic-official">—</strong>
+                    </div>
+                    <div>
+                      <span class="metric-label">FX implícito</span>
+                      <strong id="fx-diagnostic-implied">—</strong>
+                    </div>
+                  </div>
+                  <p class="fx-diagnostic-note">El USD del portfolio se calcula dividiendo el valor ARS por el CCL actual. Si el FX implícito (valor ARS ÷ valor USD reportado) se aleja del CCL, hay algún ratio CEDEAR mal cargado.</p>
+                </article>
                 <div class="summary-grid" id="portfolio-summary-grid"></div>
                 <article class="portfolio-subpanel benchmark-panel is-hidden" id="benchmark-panel">
                   <div class="portfolio-subpanel-head">
                     <div>
-                      <p class="panel-kicker">Benchmark</p>
-                      <h3>Benchmark vs tu portfolio</h3>
+                      <p class="panel-kicker">Benchmark · vs macro AR</p>
+                      <h3>Cómo se ubica tu portfolio frente a inflación, MEP, CCL, oficial y plazo fijo</h3>
                     </div>
-                    <p class="panel-caption">Tracked value en ARS por benchmark, ordenado para ver outperformance.</p>
                   </div>
                   <div class="benchmark-bars" id="benchmark-bars"></div>
                 </article>
@@ -791,6 +839,10 @@
         </div>
         </div>
       </main>
+
+      <footer class="build-footer" aria-hidden="true">
+        <span class="build-mark" id="build-mark">UI build · cargando…</span>
+      </footer>
     </div>
 
     <datalist id="ticker-suggestions"></datalist>
@@ -976,6 +1028,6 @@
          before each deploy. Loaded BEFORE app.js so the constant is available
          when the API_BASE resolution runs. Cached with `no-store` per vercel.json. -->
     <script src="./config.js"></script>
-    <script src="./app.js"></script>
+    <script src="./app.js?v=20260528-design3"></script>
   </body>
 </html>
