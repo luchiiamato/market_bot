@@ -6,6 +6,39 @@
 
 ---
 
+## Status snapshot — 2026-05-30 (sesión "tester externo")
+
+**Foco del día: bugs reportados + acceso para tester real. Hecho:**
+
+- **Gemini chat "recortado"** ✅ FIX. Causa: `max_output_tokens=420` (gemini-2.5-flash
+  es "thinking", gastaba el budget razonando → texto cortado). Subido a 2048.
+  + extracción de texto robusta (no 500 en respuesta vacía/bloqueada) + pricing de
+  2.5-flash/pro agregado + label "Buffy" → "Gemini". Verificado end-to-end: responde
+  completo, costo $0.000154, tokens OK.
+- **Carga de stocks "se ve rara / mapeo"** ✅ FIX. Causa: la tabla
+  `CANONICAL_CEDEAR_RATIOS` estaba MAL en **44 de 64 tickers** (eran adivinanzas).
+  Derivé los ratios reales desde paridad de mercado en vivo (local_ars × ratio / CCL
+  ≈ underlying_usd). MELI 10→120, AAPL 10→20, MSFT 5→30, META 6→24, AMZN 2→144, etc.
+  El valor ARS/USD del portfolio YA era correcto (usa precio local × qty); el ratio mal
+  solo afectaba "equivale a X acciones" + chips. Ahora todo coherente.
+- **Números del portfolio** ✅ VERIFICADO con el Balanz real del user: valor AR$ 19.48M,
+  cost 17.34M, **+12.3% P&L, FX implícito 1485 = CCL**. El "-54%" que el user vio antes
+  era el bug viejo (server con código previo al fix CCL).
+- **Performance ranking cold = 65s** ✅ MITIGADO. Warmup en background al startup
+  (loop cada 8 min < TTL 600s) → el primer tester nunca espera, ranking responde en 6ms.
+  Gateado para no correr bajo pytest (evita race con reload de config).
+- **`.env` destrackeado de git** ✅ — tenía la Gemini key real; estaba gitignored pero
+  trackeado. `git rm --cached .env`. La key queda solo local, no se filtra al commitear.
+- **Frontend same-origin-aware** ✅ verificado: `API_BASE = window.location.origin`,
+  así que servido por túnel o Fly el tester pega al dominio correcto (no a su localhost).
+- **90/90 tests pasan** offline en 4.9s.
+
+**Acceso para tester — DECISIÓN PENDIENTE del user (ver sección "Acceso tester" abajo).**
+El túnel cloudflared quedó bloqueado por el clasificador de seguridad (expone la máquina
+local con keys + DB). Caminos: (A) deploy real Fly+Vercel, (B) túnel corrido por el user.
+
+---
+
 ## Status snapshot — 2026-05-28 (post Sprint 3, mid Sprint 4)
 
 - **Foundation (Agents A–G)**: ✅ entregada.
@@ -946,7 +979,28 @@ más features, vamos a sentirlo. El TTI se va a degradar.
   vía UI, encriptarla en SQLite con Fernet, y usarla en lugar de la del .env.
   Útil para que cada user pague su propio uso.
 
-### 8.3 · Context-aware prompts `[ ]` PENDIENTE — diferenciador clave
+### 8.3 · Context-aware prompts `[x]` DONE 2026-05-30
+
+> ✅ El system prompt hidrata perfil + portfolio real del user
+> (`_build_chat_profile_context` + `_build_chat_portfolio_context` en app.py):
+> posiciones top, P&L ARS/USD, retorno real vs inflación, vs benchmark preferido,
+> exposición sectorial + geográfica. Verificado end-to-end con el Balanz real:
+> el bot respondió "85.41% US, Semis 35.89%, Tech 30.25%, P&L 12.34%".
+>
+> **Bugs encontrados y arreglados durante la verificación:**
+> - `_format_chat_pct` no multiplicaba ×100 → el bot decía "P&L 0.12%" para un
+>   +12.34% real. Unificado: el formateador hace ×100, callers pasan ratios.
+>   Regression test `test_format_chat_pct_multiplies_ratio_by_100`.
+> - Context injection estaba gateado por keywords → "cuál es mi P&L?" no matcheaba
+>   "portfolio" y el bot decía "no tengo tus datos". Ahora si el user tiene
+>   posiciones, el contexto se inyecta SIEMPRE (~600 tokens, costo despreciable).
+>
+> **Pendiente opcional (8.3b):** tool-use / function calling real (analyze_ticker,
+> get_market_overview como tools que el modelo invoca). El contexto estático ya
+> cubre el 80% del valor; las tools darían respuestas sobre tickers que el user
+> NO tiene en cartera. Dejar para cuando se pida.
+
+### 8.3-old · (spec original, ahora cumplida)
 
 > ⏳ NO ARRANCADO. Es el feature que hace al chatbot **útil** vs. un ChatGPT
 > genérico: que sepa de tu portfolio, tu perfil, tus decisiones.

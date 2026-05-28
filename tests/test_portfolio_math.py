@@ -426,7 +426,8 @@ def test_canonical_ratio_wins_over_parity_for_known_ticker():
     )
 
     assert ref.ratio_source == "builtin_canonical"
-    assert ref.cedear_ratio == pytest.approx(58.0)
+    # GOOGL canonical ratio is 60:1 (market-validated 2026-05).
+    assert ref.cedear_ratio == pytest.approx(60.0)
 
 
 def test_balanz_normalize_currency_handles_all_variants():

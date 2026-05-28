@@ -448,3 +448,13 @@ def test_api_chat_concept_question_skips_portfolio_summary(api_client, auth_head
 
     last_call = fake.calls[-1]
     assert "PORTFOLIO DEL USUARIO" not in last_call["system"]
+
+
+def test_format_chat_pct_multiplies_ratio_by_100():
+    """Regression: _format_chat_pct must turn a ratio into a percentage.
+    A 100x bug made the chat say 'P&L 0.12%' for a real +12.34% portfolio."""
+    from services.api.app import _format_chat_pct
+
+    assert _format_chat_pct(0.1234) == "12.34%"
+    assert _format_chat_pct(-0.5) == "-50.00%"
+    assert _format_chat_pct(0.0) == "0.00%"

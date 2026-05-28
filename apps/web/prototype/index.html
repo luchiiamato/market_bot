@@ -8,7 +8,7 @@
     <title>Market Bot · Editorial Terminal</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="./styles.css?v=20260529-sprint7c" />
+    <link rel="stylesheet" href="./styles.css?v=20260530-sprint8" />
     <script>
       // Pre-paint theme resolution to avoid FOUC.
       (function () {
@@ -1154,12 +1154,12 @@
     <script src="./config.js"></script>
     <!-- Main app uses `defer` so it doesn't block first paint. Parsing
          still happens once HTML is ready; perceived FCP improves. -->
-    <script src="./app.js?v=20260529-sprint7c-c" defer></script>
+    <script src="./app.js?v=20260530-sprint8-c" defer></script>
     <!-- Glossary (~50KB of data) is intentionally NOT preloaded here.
          app.js injects it on demand when the user opens Learning, or on
          pointerenter of the Learning tab as a prefetch warmup. -->
     <!-- Optional: preload to bias the browser cache without executing it.
          Comment out if you want strictly no-cost first paint. -->
-    <link rel="prefetch" href="./glossary.js?v=20260529-sprint7c-c" as="script" />
+    <link rel="prefetch" href="./glossary.js?v=20260530-sprint8-c" as="script" />
   </body>
 </html>

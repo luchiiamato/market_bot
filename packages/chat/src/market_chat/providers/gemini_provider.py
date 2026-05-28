@@ -14,6 +14,8 @@ from .base import ChatMessage, ChatProvider, ProviderResponse
 
 
 _PRICING: dict[str, tuple[float, float]] = {
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-2.5-pro": (1.25, 10.0),
     "gemini-2.0-flash-exp": (0.075, 0.30),
     "gemini-2.0-flash": (0.075, 0.30),
     "gemini-1.5-flash": (0.075, 0.30),
@@ -29,7 +31,11 @@ class GeminiChatProvider(ChatProvider):
         self._api_key = os.getenv("CHAT_GEMINI_API_KEY", "").strip()
         self._model = os.getenv("CHAT_GEMINI_MODEL", "").strip() or self.default_model
         self._temperature = float(os.getenv("CHAT_GEMINI_TEMPERATURE", "0.2") or 0.2)
-        self._max_output_tokens = int(os.getenv("CHAT_GEMINI_MAX_OUTPUT_TOKENS", "420") or 420)
+        # 420 was far too low — gemini-2.5-flash is a "thinking" model that
+        # spends part of its output budget reasoning, so a tiny cap returned
+        # truncated or empty replies ("recortado"). 2048 gives room for a
+        # full answer plus the model's internal thinking.
+        self._max_output_tokens = int(os.getenv("CHAT_GEMINI_MAX_OUTPUT_TOKENS", "2048") or 2048)
         self._max_history_messages = max(
             int(os.getenv("CHAT_GEMINI_MAX_HISTORY_MESSAGES", "12") or 12),
             2,
@@ -110,7 +116,28 @@ class GeminiChatProvider(ChatProvider):
         )
         latency_ms = int((time.perf_counter() - started) * 1000)
 
-        text = (getattr(response, "text", None) or "").strip()
+        # Gemini raises when you read `.text` on a blocked/empty/MAX_TOKENS
+        # response instead of returning an empty string. Guard it and fall
+        # back to digging the candidate parts so the user gets *something*
+        # instead of a 500.
+        text = ""
+        try:
+            text = (getattr(response, "text", None) or "").strip()
+        except Exception:
+            text = ""
+        if not text:
+            try:
+                candidates = getattr(response, "candidates", None) or []
+                for candidate in candidates:
+                    parts = getattr(getattr(candidate, "content", None), "parts", None) or []
+                    joined = "".join(getattr(p, "text", "") or "" for p in parts).strip()
+                    if joined:
+                        text = joined
+                        break
+            except Exception:
+                text = ""
+        if not text:
+            text = "_(El modelo no devolvió texto. Probá reformular la pregunta o achicarla.)_"
         usage = getattr(response, "usage_metadata", None)
         tokens_in = int(getattr(usage, "prompt_token_count", 0) or 0)
         tokens_out = int(getattr(usage, "candidates_token_count", 0) or 0)

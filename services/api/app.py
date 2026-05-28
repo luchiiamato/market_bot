@@ -144,6 +144,45 @@ configure_logger().info(
 )
 
 api_logger = configure_logger()
+
+
+@app.on_event("startup")
+def _warm_rankings_cache() -> None:
+    """Pre-compute the default landing ranking in a background thread so the
+    first visitor (a tester!) gets an instant cached result instead of waiting
+    ~60s for 57 tickers to be analyzed cold. Best-effort: any failure is
+    swallowed; the cache just stays cold and the normal request path fills it.
+    """
+    import sys
+    import threading
+    import time as _time
+
+    # Don't warm during the test suite: the daemon thread races with tests
+    # that reload market_bot.config / clear caches, causing flaky failures.
+    # Also allow an explicit opt-out for environments that don't want it.
+    if "pytest" in sys.modules or os.getenv("MARKET_BOT_WARM_RANKINGS", "1") == "0":
+        return
+
+    def _warm() -> None:
+        # Re-warm every 8 min — under the 600s ranking cache TTL — so the
+        # cache never goes cold while a tester is exploring the app.
+        while True:
+            for horizon in (Horizon.SHORT, Horizon.LONG):
+                try:
+                    started = _time.perf_counter()
+                    service.rank_universe(horizon, limit=6, cedear_only=True, mode="default")
+                    elapsed = int((_time.perf_counter() - started) * 1000)
+                    api_logger.info(
+                        "rankings warmup done",
+                        extra={"horizon": horizon.value, "elapsed_ms": elapsed},
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    api_logger.info("rankings warmup failed", extra={"error": str(exc)})
+            _time.sleep(480)
+
+    threading.Thread(target=_warm, name="rankings-warmup", daemon=True).start()
+
+
 MARKET_OVERVIEW_CACHE: TTLCache[MarketOverviewResponse] = TTLCache(ttl_seconds=180)
 NEWS_CACHE: TTLCache[list[NewsItemResponse]] = TTLCache(ttl_seconds=300)
 EARNINGS_CACHE: TTLCache[list[EarningsEventResponse]] = TTLCache(ttl_seconds=900)
@@ -1184,7 +1223,8 @@ def _format_chat_money(value: float, currency: str) -> str:
 
 
 def _format_chat_pct(value: float) -> str:
-    return f"{value:.2f}%"
+    # `value` is a ratio (0.1234 -> "12.34%"). All callers pass ratios.
+    return f"{value * 100:.2f}%"
 
 
 def _build_chat_profile_context(user_id: int) -> str:
@@ -1231,18 +1271,18 @@ def _build_chat_portfolio_context(user_id: int) -> str:
     if top_positions:
         lines.append("- Principales posiciones por peso actual:")
         for position in top_positions:
-            weight = (position.current_value_ars / summary.total_value_ars * 100) if summary.total_value_ars else 0.0
+            weight = (position.current_value_ars / summary.total_value_ars) if summary.total_value_ars else 0.0
             lines.append(
                 f"  - {position.symbol}: {_format_chat_money(position.current_value_ars, 'ARS')} | "
                 f"P&L {_format_chat_pct(position.return_pct_ars)} | peso {_format_chat_pct(weight)}"
             )
 
     if top_sectors:
-        sectors = ", ".join(f"{item.label} {_format_chat_pct(item.pct * 100)}" for item in top_sectors)
+        sectors = ", ".join(f"{item.label} {_format_chat_pct(item.pct)}" for item in top_sectors)
         lines.append(f"- Exposicion sectorial principal: {sectors}")
 
     if top_regions:
-        regions = ", ".join(f"{item.label} {_format_chat_pct(item.pct * 100)}" for item in top_regions)
+        regions = ", ".join(f"{item.label} {_format_chat_pct(item.pct)}" for item in top_regions)
         lines.append(f"- Exposicion geografica principal: {regions}")
 
     return "\n".join(lines)
@@ -1253,14 +1293,24 @@ def _build_chat_system_prompt(current_user: AuthenticatedUser, message_content: 
         SYSTEM_PROMPT_BASELINE,
         _build_chat_profile_context(current_user.user_id),
     ]
-    if _message_needs_portfolio_context(message_content):
-        try:
-            sections.append(_build_chat_portfolio_context(current_user.user_id))
+    # Inject the portfolio context whenever the user actually has positions —
+    # the keyword gate missed obvious questions ("cuál es mi P&L?") and left the
+    # bot answering "no tengo tus datos", which is confusing. The context is
+    # ~600 tokens, so always-on is cheap and makes the assistant reliably aware.
+    # If the user has no positions we skip it (nothing useful to add) unless the
+    # message explicitly asks about portfolio (so the bot can say "cargá posiciones").
+    try:
+        portfolio_context = _build_chat_portfolio_context(current_user.user_id)
+        has_positions = "No hay posiciones cargadas" not in portfolio_context
+        if has_positions or _message_needs_portfolio_context(message_content):
+            sections.append(portfolio_context)
             sections.append(
                 "INSTRUCCION DE USO DEL CONTEXTO: si el usuario pregunta por su portfolio, "
-                "usa estos datos como fuente de verdad y evita responder de forma generica."
+                "P&L, rendimiento, posiciones o exposicion, usa estos datos como fuente de "
+                "verdad y evita responder de forma generica."
             )
-        except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        if _message_needs_portfolio_context(message_content):
             sections.append(
                 "PORTFOLIO DEL USUARIO:\n"
                 f"- No se pudo cargar el resumen del portfolio en este momento ({exc})."

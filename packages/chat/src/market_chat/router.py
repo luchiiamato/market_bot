@@ -16,7 +16,7 @@ from .providers.openai_provider import OpenAIChatProvider
 
 PROVIDER_LABELS = {
     "anthropic": "Claude",
-    "gemini": "Buffy",
+    "gemini": "Gemini",
     "openai": "OpenAI",
 }
 

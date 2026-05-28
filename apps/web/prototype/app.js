@@ -1,7 +1,7 @@
 // Build stamp — bumped on every UI design pass. Visible at the bottom of the
 // page AND in the console so we can confirm a fresh build is loaded when the
 // user reports "I don't see changes" (usually a cache issue).
-const MARKET_BOT_UI_BUILD = "2026-05-29 · sprint-7c · diagnostics+perf+surprise+exposure";
+const MARKET_BOT_UI_BUILD = "2026-05-30 · sprint-8 · chat+ratios-fixed";
 console.info(`%cMarket Bot UI build: ${MARKET_BOT_UI_BUILD}`, "color:#c6f25c;font-weight:600");
 document.addEventListener("DOMContentLoaded", function () {
   const mark = document.getElementById("build-mark");

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "marketbot",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "uvicorn", "services.api.app:app", "--host", "127.0.0.1", "--port", "8000"],
+      "port": 8000
+    }
+  ]
+}

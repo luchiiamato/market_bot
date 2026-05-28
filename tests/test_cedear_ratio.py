@@ -46,7 +46,8 @@ def test_canonical_table_beats_parity_inference():
         underlying_price_usd=180.0,
     )
     assert ref.ratio_source == "builtin_canonical"
-    assert ref.cedear_ratio == 10.0
+    # AAPL canonical ratio is 20:1 (market-validated 2026-05, was a wrong 10 guess).
+    assert ref.cedear_ratio == 20.0
 
 
 def test_parity_match_uses_estimated_ratio_for_unknown_ticker():
@@ -96,8 +97,8 @@ def test_parity_miss_uses_unbounded_estimate_for_unknown_ticker():
 
 
 def test_known_ticker_hits_canonical_even_without_price_legs():
-    # MELI is in canonical (10:1). Without price legs, we'd previously fall
-    # straight to fallback_default. The canonical layer is what stops that.
+    # MELI is in canonical (120:1, market-validated 2026-05). Without price legs,
+    # we'd previously fall straight to fallback_default. The canonical layer stops that.
     ref = resolve_cedear_reference(
         symbol="MELI",
         underlying_ticker="MELI",
@@ -107,7 +108,7 @@ def test_known_ticker_hits_canonical_even_without_price_legs():
         underlying_price_usd=None,
     )
     assert ref.ratio_source == "builtin_canonical"
-    assert ref.cedear_ratio == 10.0
+    assert ref.cedear_ratio == 120.0
 
 
 def test_underlying_ticker_inferred_from_symbol_when_missing():
