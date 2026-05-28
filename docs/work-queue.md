@@ -33,9 +33,14 @@
   así que servido por túnel o Fly el tester pega al dominio correcto (no a su localhost).
 - **90/90 tests pasan** offline en 4.9s.
 
-**Acceso para tester — DECISIÓN PENDIENTE del user (ver sección "Acceso tester" abajo).**
-El túnel cloudflared quedó bloqueado por el clasificador de seguridad (expone la máquina
-local con keys + DB). Caminos: (A) deploy real Fly+Vercel, (B) túnel corrido por el user.
+**Acceso para tester** ✅ RESUELTO 2026-05-30: el user corrió `cloudflared tunnel --url
+http://localhost:8000` y anda. URL `*.trycloudflare.com/app/` compartible mientras la
+Mac + el túnel + el server (:8000) sigan vivos. Guía en `docs/tester-access.md`.
+
+**PRÓXIMO al retomar (pedido del user 2026-05-30):**
+- **7.6 · UX del análisis** — al tocar "Analizar setup" que avise cuándo termina
+  (toast/notification) + UI más llevadera durante la espera (skeleton, no spinner pelado,
+  sin doble-submit). Spec completa en sección 7.6. Es lo primero que pidió hacer.
 
 ---
 
@@ -895,6 +900,54 @@ no validan que `pnl_ars == 904385` para fixture X. Necesitamos
 > aunque el user no abra Learning.
 > **Skeleton state "Cargando diccionario…"** en Learning si todavía no llegó.
 > `ensureGlossaryLoaded()` Promise idempotente para evitar double-load.
+
+### 7.6 · UX del análisis · feedback de progreso + UI más llevadera `[ ]`
+
+> Pedido del user (2026-05-30): al tocar "Analizar setup" el análisis tarda
+> (fetch yfinance + indicadores + señales + escenarios) y NO hay feedback claro
+> de cuándo termina. Querés que **avise cuando termina** y que la UI sea más
+> llevadera durante la espera.
+
+**Por qué importa**: el `/analyze` de un ticker cold puede tardar varios segundos.
+Hoy el botón muestra un spinner pero el user no sabe si está vivo o colgado.
+Para un tester externo, esa incertidumbre es de las cosas que más fricciona.
+
+**Plan**
+
+1. **Estados de progreso explícitos** en el botón + status line:
+   - Al disparar: "Analizando AAPL… (esto puede tardar unos segundos)".
+   - Si se puede, fases: "Trayendo precios → calculando indicadores → escenarios".
+     (El backend no expone fases hoy; o lo hacemos con un endpoint SSE/stream,
+     o simulamos las fases en el front con timers honestos.)
+   - Al terminar: toast/aviso "✓ Análisis de AAPL listo" + scroll suave al veredicto.
+2. **Aviso de finalización** (lo que pidió el user):
+   - Toast visual no intrusivo (esquina) con `success-check` transition de transitions.dev.
+   - Opcional: `Notification` API del browser si la pestaña está en background
+     ("AAPL: setup alcista listo") — pedir permiso la primera vez.
+   - Opcional: sonido corto suave (toggle en settings, off por default).
+3. **UI más llevadera durante la espera**:
+   - Skeleton del verdict card (no spinner pelado): placeholders pulsando con la
+     forma real del resultado, así el layout no salta cuando llega la data.
+   - Deshabilitar el botón + cambiar label a "Analizando…" para evitar doble submit.
+   - Si tarda > ~8s, mensaje tranquilizador ("Sigue procesando, el primer análisis
+     de un ticker es el más lento; los próximos son instantáneos por cache").
+4. **Cache hit feedback**: si el análisis vino de cache (instantáneo), no mostrar
+   el flujo de espera — directo al resultado.
+
+**Files**
+- `apps/web/prototype/app.js` — `analyzeTicker()`: estados de progreso, toast,
+  Notification API, skeleton. Buscar `setButtonBusy` / `setStatus`.
+- `apps/web/prototype/styles.css` — `.analysis-toast`, skeleton del verdict,
+  reusar `--check-*` tokens de transitions.dev (success-check ya instalado).
+- `apps/web/prototype/index.html` — contenedor del toast + skeleton del verdict.
+- (Opcional backend) `services/api/app.py` — endpoint SSE `/analyze/stream` que
+  emita fases. Solo si el feedback simulado en front no alcanza.
+
+**DoD**
+- Al analizar, el user siempre sabe: arrancó / sigue / terminó.
+- Aviso claro de finalización (toast mínimo + opcional Notification).
+- Sin doble-submit. Sin salto de layout. Cache hit = instantáneo sin ruido.
+- Probar en el túnel con un tester: ¿la espera se siente manejable?
 
 **Por qué**: `app.js` ya pesa 2300+ líneas. Cuando metamos chat (Sprint 8) y
 más features, vamos a sentirlo. El TTI se va a degradar.
