@@ -1,0 +1,9 @@
+{
+  "name": "market-bot-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Static prototype for Market Bot — vanilla HTML/CSS/JS, no framework.",
+  "scripts": {
+    "build": "node ./build.js"
+  }
+}

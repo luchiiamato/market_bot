@@ -22,6 +22,19 @@
         }
       })();
     </script>
+    <script>
+      // First-paint reveal scope. Adding the class before <body> renders means
+      // the staggered keyframes run once; removing it after they finish stops
+      // surface swaps from replaying the slow cascade.
+      document.addEventListener("DOMContentLoaded", function () {
+        document.body.classList.add("is-booting");
+        // Longest delay (verdict-panel 420ms) + duration (motion-slow 620ms)
+        // ≈ 1040ms. Add a safety margin then drop the class.
+        window.setTimeout(function () {
+          document.body.classList.remove("is-booting");
+        }, 1200);
+      });
+    </script>
   </head>
   <body>
     <div class="page-shell">
@@ -232,7 +245,8 @@
           </div>
         </section>
 
-        <div class="surface-stack" id="surface-workspace">
+        <div class="surface-slider" data-active-surface="workspace" data-direction="forward">
+        <div class="surface-stack is-active" id="surface-workspace" data-surface-id="workspace">
           <section class="panel portfolio-panel">
             <div class="panel-header">
               <div>
@@ -464,7 +478,7 @@
           </section>
         </div>
 
-        <div class="surface-stack is-hidden" id="surface-howto">
+        <div class="surface-stack" id="surface-howto" data-surface-id="howto">
           <section class="panel howto-panel">
             <div class="panel-header">
               <div>
@@ -565,7 +579,7 @@
           </section>
         </div>
 
-        <div class="surface-stack is-hidden" id="surface-learning">
+        <div class="surface-stack" id="surface-learning" data-surface-id="learning">
           <section class="panel learning-panel">
             <div class="panel-header">
               <div>
@@ -614,7 +628,7 @@
           </section>
         </div>
 
-        <div class="surface-stack is-hidden" id="surface-trading">
+        <div class="surface-stack" id="surface-trading" data-surface-id="trading">
           <section class="panel trading-panel">
             <div class="panel-header">
               <div>
@@ -651,6 +665,7 @@
               </article>
             </div>
           </section>
+        </div>
         </div>
       </main>
     </div>
@@ -834,6 +849,10 @@
         }
       })();
     </script>
+    <!-- Deploy-time config: Vercel regenerates config.js with MARKET_BOT_API_BASE
+         before each deploy. Loaded BEFORE app.js so the constant is available
+         when the API_BASE resolution runs. Cached with `no-store` per vercel.json. -->
+    <script src="./config.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

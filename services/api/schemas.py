@@ -322,6 +322,45 @@ class MarketPulseItemResponse(BaseModel):
     note: str
 
 
+class ReliabilityBinResponse(BaseModel):
+    bin_lower: float
+    bin_upper: float
+    sample_size: int
+    mean_predicted: float
+    fraction_positive: float
+
+
+class ValidationReportResponse(BaseModel):
+    ticker: str
+    horizon: str
+    warmup: int
+    horizon_days: int
+    step_days: int
+    sample_size: int
+    brier_score: float
+    reliability_bins: list[ReliabilityBinResponse] = Field(default_factory=list)
+
+
+class DecisionRequest(BaseModel):
+    ticker: str = Field(min_length=1, max_length=16)
+    horizon: str = Field(default="short", pattern="^(short|long)$")
+    action_taken: str = Field(min_length=1, max_length=32)
+    rationale: Optional[str] = Field(default=None, max_length=500)
+
+
+class DecisionResponse(BaseModel):
+    decision_id: int
+    ticker: str
+    horizon: str
+    action_taken: str
+    conviction: Optional[float] = None
+    rationale: Optional[str] = None
+    decided_at: datetime
+    realized_return: Optional[float] = None
+    realized_at: Optional[datetime] = None
+    analysis_snapshot: dict = Field(default_factory=dict)
+
+
 class MarketOverviewResponse(BaseModel):
     generated_at: datetime
     ticker: Optional[str] = None

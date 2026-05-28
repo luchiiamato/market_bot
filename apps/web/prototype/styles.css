@@ -25,6 +25,17 @@
   --font-sans: "DM Sans", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
+  /* transitions.dev — page side-by-side (used for the workspace ↔ howto ↔
+     learning ↔ trading surface swap). Snappy: 200ms slide + 200ms fade. */
+  --page-slide-dur: 200ms;
+  --page-fade-dur: 200ms;
+  --page-slide-distance: 8px;
+  --page-blur: 3px;
+  --page-stagger: 0ms;
+  --page-exit-enabled: 1;
+  --page-slide-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --page-fade-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
   /* Background system */
   --bg-html: #07090a;
   --bg-grad-warm: rgba(232, 122, 78, 0.16);
@@ -1046,8 +1057,63 @@ button[data-busy="true"] .button-label {
   /* background is provided by .seg-indicator */
 }
 
+/* ----------------------------- Surface slider (workspace ↔ howto ↔ learning ↔ trading) -----------------------------
+   We stack all surfaces in a single grid cell so the wrapper height equals
+   the tallest surface and switching never reflows. Each surface fades +
+   slides in 200ms. Direction comes from --t-page-from-x set per surface
+   index, so going "forward" through the tabs slides left → right and
+   "backward" slides right → left. */
+
+.surface-slider {
+  position: relative;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.35fr);
+  gap: 18px;
+}
+
 .surface-stack {
-  display: contents;
+  grid-area: 1 / 1 / 2 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-template-rows: auto;
+  gap: 18px;
+  align-content: start;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(calc(var(--t-page-from-x, 0px) * var(--page-exit-enabled)));
+  filter: blur(calc(var(--page-blur) * var(--page-exit-enabled)));
+  transition:
+    opacity   var(--page-fade-dur)  var(--page-fade-ease),
+    transform var(--page-slide-dur) var(--page-slide-ease),
+    filter    var(--page-slide-dur) var(--page-slide-ease);
+  will-change: opacity, transform, filter;
+}
+
+.surface-stack.is-active {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+  filter: blur(0);
+  transition-delay: var(--page-stagger);
+}
+
+/* Direction: the slider sets data-direction on swap so each surface knows
+   which side to enter / exit from. Forward = new surface comes from the
+   right; backward = from the left. */
+.surface-slider[data-direction="forward"] .surface-stack:not(.is-active) {
+  --t-page-from-x: var(--page-slide-distance);
+}
+.surface-slider[data-direction="backward"] .surface-stack:not(.is-active) {
+  --t-page-from-x: calc(var(--page-slide-distance) * -1);
+}
+
+/* Browsers without subgrid: fall back to a plain grid with the same
+   column template. Visually identical, just no shared track sizing. */
+@supports not (grid-template-columns: subgrid) {
+  .surface-stack {
+    grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.35fr);
+  }
 }
 
 /* ----------------------------- Panel header ----------------------------- */
@@ -2243,56 +2309,62 @@ body[data-loading="true"] .verdict-card::after {
   to   { transform: scaleX(1); opacity: 1; }
 }
 
-.masthead,
-.hero-copy,
-.hero-sidebar,
-.surface-tabs-panel,
-.portfolio-panel,
-.verdict-panel,
-.radar-panel,
-.learning-panel,
-.trading-panel {
+/* Initial page-load reveal: scoped to `body.is-booting` so the keyframes
+   run exactly once. JS removes the class after the staggered cascade
+   finishes (~1s), which means subsequent surface swaps don't replay the
+   slow reveal — only the snappy surface-slider transition fires. */
+
+body.is-booting .masthead,
+body.is-booting .hero-copy,
+body.is-booting .hero-sidebar,
+body.is-booting .surface-tabs-panel,
+body.is-booting .portfolio-panel,
+body.is-booting .verdict-panel,
+body.is-booting .radar-panel,
+body.is-booting .howto-panel,
+body.is-booting .learning-panel,
+body.is-booting .trading-panel {
   animation: reveal var(--motion-slow) var(--ease-out) both;
 }
 
-.masthead          { animation-delay: 0ms; }
-.hero-copy         { animation-delay: 80ms; }
-.hero-sidebar      { animation-delay: 160ms; }
-.surface-tabs-panel{ animation-delay: 240ms; }
-.portfolio-panel   { animation-delay: 300ms; }
-.radar-panel       { animation-delay: 360ms; }
-.verdict-panel     { animation-delay: 420ms; }
-.howto-panel       { animation-delay: 260ms; }
-.learning-panel    { animation-delay: 320ms; }
-.trading-panel     { animation-delay: 320ms; }
+body.is-booting .masthead          { animation-delay: 0ms; }
+body.is-booting .hero-copy         { animation-delay: 80ms; }
+body.is-booting .hero-sidebar      { animation-delay: 160ms; }
+body.is-booting .surface-tabs-panel{ animation-delay: 240ms; }
+body.is-booting .portfolio-panel   { animation-delay: 300ms; }
+body.is-booting .radar-panel       { animation-delay: 360ms; }
+body.is-booting .verdict-panel     { animation-delay: 420ms; }
+body.is-booting .howto-panel       { animation-delay: 260ms; }
+body.is-booting .learning-panel    { animation-delay: 320ms; }
+body.is-booting .trading-panel     { animation-delay: 320ms; }
 
-.verdict-grid > .verdict-card {
+body.is-booting .verdict-grid > .verdict-card {
   animation: reveal var(--motion-base) var(--ease-out) both;
 }
-.verdict-grid > .verdict-card:nth-child(1) { animation-delay: 60ms; }
-.verdict-grid > .verdict-card:nth-child(2) { animation-delay: 130ms; }
-.verdict-grid > .verdict-card:nth-child(3) { animation-delay: 200ms; }
-.verdict-grid > .verdict-card:nth-child(4) { animation-delay: 270ms; }
+body.is-booting .verdict-grid > .verdict-card:nth-child(1) { animation-delay: 60ms; }
+body.is-booting .verdict-grid > .verdict-card:nth-child(2) { animation-delay: 130ms; }
+body.is-booting .verdict-grid > .verdict-card:nth-child(3) { animation-delay: 200ms; }
+body.is-booting .verdict-grid > .verdict-card:nth-child(4) { animation-delay: 270ms; }
 
-.analysis-grid > .analysis-card {
+body.is-booting .analysis-grid > .analysis-card {
   animation: reveal var(--motion-base) var(--ease-out) both;
 }
-.analysis-grid > .analysis-card:nth-child(1) { animation-delay: 80ms; }
-.analysis-grid > .analysis-card:nth-child(2) { animation-delay: 160ms; }
-.analysis-grid > .analysis-card:nth-child(3) { animation-delay: 240ms; }
-.analysis-grid > .analysis-card:nth-child(4) { animation-delay: 320ms; }
-.analysis-grid > .analysis-card:nth-child(5) { animation-delay: 400ms; }
-.analysis-grid > .analysis-card:nth-child(6) { animation-delay: 480ms; }
+body.is-booting .analysis-grid > .analysis-card:nth-child(1) { animation-delay: 80ms; }
+body.is-booting .analysis-grid > .analysis-card:nth-child(2) { animation-delay: 160ms; }
+body.is-booting .analysis-grid > .analysis-card:nth-child(3) { animation-delay: 240ms; }
+body.is-booting .analysis-grid > .analysis-card:nth-child(4) { animation-delay: 320ms; }
+body.is-booting .analysis-grid > .analysis-card:nth-child(5) { animation-delay: 400ms; }
+body.is-booting .analysis-grid > .analysis-card:nth-child(6) { animation-delay: 480ms; }
 
-.radar-grid > .radar-card {
+body.is-booting .radar-grid > .radar-card {
   animation: reveal var(--motion-base) var(--ease-out) both;
 }
-.radar-grid > .radar-card:nth-child(1) { animation-delay: 40ms; }
-.radar-grid > .radar-card:nth-child(2) { animation-delay: 100ms; }
-.radar-grid > .radar-card:nth-child(3) { animation-delay: 160ms; }
-.radar-grid > .radar-card:nth-child(4) { animation-delay: 220ms; }
-.radar-grid > .radar-card:nth-child(5) { animation-delay: 280ms; }
-.radar-grid > .radar-card:nth-child(6) { animation-delay: 340ms; }
+body.is-booting .radar-grid > .radar-card:nth-child(1) { animation-delay: 40ms; }
+body.is-booting .radar-grid > .radar-card:nth-child(2) { animation-delay: 100ms; }
+body.is-booting .radar-grid > .radar-card:nth-child(3) { animation-delay: 160ms; }
+body.is-booting .radar-grid > .radar-card:nth-child(4) { animation-delay: 220ms; }
+body.is-booting .radar-grid > .radar-card:nth-child(5) { animation-delay: 280ms; }
+body.is-booting .radar-grid > .radar-card:nth-child(6) { animation-delay: 340ms; }
 
 /* ----------------------------- Scrollbar ----------------------------- */
 

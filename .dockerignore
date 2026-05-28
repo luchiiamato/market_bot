@@ -1,0 +1,57 @@
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# Python caches and build artifacts
+__pycache__
+**/__pycache__
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info
+**/*.egg-info
+.eggs
+build
+dist
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Virtualenvs
+.venv
+venv
+env
+
+# Source trees not needed at runtime
+legacy
+tests
+apps
+docs
+newmodel
+recomendaciones
+vendor
+
+# Local data (Fly mounts a volume at /data)
+data
+
+# Documentation and project meta
+*.md
+LICENSE
+
+# Editor / OS noise
+.DS_Store
+.idea
+.vscode
+*.swp
+*.swo
+
+# Fly / Docker meta (don't recurse into our own config)
+fly.toml
+Dockerfile
+.dockerignore
+
+# Dev-only requirements
+requirements-dev.txt

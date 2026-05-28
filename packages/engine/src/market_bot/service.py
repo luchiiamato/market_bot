@@ -26,6 +26,13 @@ from .strategies import (
     suggest_actions,
 )
 from .utils import TTLCache
+from .validation import (
+    BrierResult,
+    ReliabilityBin,
+    brier_score,
+    reliability_bins,
+    walk_forward_predictions,
+)
 
 
 class MarketBotService:
@@ -140,6 +147,46 @@ class MarketBotService:
 
     def suggested_cedear_universe(self) -> list[str]:
         return CEDEAR_UNIVERSE.copy()
+
+    def validate_ticker(
+        self,
+        ticker: str,
+        horizon: Horizon,
+        *,
+        warmup: int = 60,
+        horizon_days: int = 5,
+        step_days: int = 5,
+    ) -> BrierResult:
+        """Run walk-forward calibration for ``ticker`` and return Brier metrics.
+
+        ``step_days`` defaults to 5 so a 1-year history produces ~50 anchors —
+        enough for a stable estimate without forcing the engine to recompute
+        the probabilistic signal on every single day.
+        """
+        normalized_ticker = ticker.upper()
+        price_history = self.adapter.get_price_history(normalized_ticker, horizon)
+        enriched_history = compute_indicators(price_history.frame)
+
+        def predictor(frame_slice):
+            indicators = build_indicator_snapshot(frame_slice)
+            deterministic = generate_deterministic_signal(frame_slice, horizon)
+            probabilistic = generate_probabilistic_signal(
+                frame_slice, indicators, deterministic, horizon
+            )
+            return float(probabilistic.signal.probability_up)
+
+        predictions, labels = walk_forward_predictions(
+            enriched_history,
+            predictor,
+            warmup=warmup,
+            horizon_days=horizon_days,
+            step_days=step_days,
+        )
+        return BrierResult(
+            sample_size=len(predictions),
+            brier_score=brier_score(predictions, labels),
+            reliability_bins=reliability_bins(predictions, labels),
+        )
 
     def _analyze_for_ranking(self, ticker: str, horizon: Horizon) -> TickerAnalysis | None:
         try:

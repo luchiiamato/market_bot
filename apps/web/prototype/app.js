@@ -1,11 +1,25 @@
+// API base resolution order:
+// 1. ?apiBase=…       — debug / temporary override
+// 2. localStorage      — user-set persistent override
+// 3. window.MARKET_BOT_API_BASE  — injected at deploy time (Vercel writes
+//    `config.js` with the production API origin). Empty string = unset.
+// 4. window.location.origin     — same-origin (works for local FastAPI
+//    serving the prototype at /app/)
+// 5. localhost fallback for `file://` and other edge cases.
 const defaultApiBase =
   window.location.origin && window.location.origin !== "null"
     ? window.location.origin
     : "http://127.0.0.1:8000";
 
+const _injectedApiBase =
+  typeof window.MARKET_BOT_API_BASE === "string" && window.MARKET_BOT_API_BASE.trim()
+    ? window.MARKET_BOT_API_BASE.trim().replace(/\/$/, "")
+    : "";
+
 const API_BASE =
   new URLSearchParams(window.location.search).get("apiBase") ||
   window.localStorage.getItem("marketBotApiBase") ||
+  _injectedApiBase ||
   defaultApiBase;
 
 const AUTH_TOKEN_KEY = "marketBotAccessToken";
@@ -473,7 +487,10 @@ function setButtonBusy(button, isBusy, busyLabel) {
   }
 }
 
+const SURFACE_ORDER = ["workspace", "howto", "learning", "trading"];
+
 function setSurface(surface) {
+  const previousSurface = state.activeSurface;
   state.activeSurface = surface;
   const surfaces = {
     workspace: elements.workspaceSurface,
@@ -481,9 +498,23 @@ function setSurface(surface) {
     learning: elements.learningSurface,
     trading: elements.tradingSurface
   };
+
+  // Direction (forward / backward) drives the slide side via CSS.
+  // Forward = right-to-left enter; backward = left-to-right enter.
+  const slider = document.querySelector(".surface-slider");
+  if (slider) {
+    const fromIndex = SURFACE_ORDER.indexOf(previousSurface || "workspace");
+    const toIndex = SURFACE_ORDER.indexOf(surface);
+    const direction = toIndex >= fromIndex ? "forward" : "backward";
+    slider.setAttribute("data-direction", direction);
+    slider.setAttribute("data-active-surface", surface);
+  }
+
   Object.entries(surfaces).forEach(([key, node]) => {
     if (!node) return;
-    node.classList.toggle("is-hidden", key !== surface);
+    // Active swap via opacity/transform (no display:none), so revealing
+    // animations don't restart and the swap takes ~200ms instead of ~1s.
+    node.classList.toggle("is-active", key === surface);
   });
   elements.surfaceButtons.forEach((button) => {
     const isSelected = button.dataset.surface === surface;

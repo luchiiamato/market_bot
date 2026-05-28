@@ -62,6 +62,12 @@ def connection() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # WAL improves concurrent reader/writer behaviour — critical because the
+    # API runs `/analyze` calls in a ThreadPoolExecutor that can hit the DB
+    # in parallel. The pragma is per-database file, persisted, so this call
+    # is a no-op once the file is already in WAL mode.
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
     try:
         yield conn
         conn.commit()

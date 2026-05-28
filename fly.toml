@@ -1,0 +1,43 @@
+# Fly.io configuration for the Market Bot FastAPI backend.
+# Edit `app` to match the name you choose via `fly launch --no-deploy`.
+
+app = "market-bot-api"
+primary_region = "gru"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  MARKET_BOT_DB_PATH = "/data/market_bot.db"
+  CORS_ALLOW_ORIGINS = "https://market-bot.vercel.app"
+  CORS_ALLOW_ORIGIN_REGEX = "^https://market-bot(?:-[a-z0-9-]+)?\\.vercel\\.app$"
+  PORT = "8080"
+
+[[mounts]]
+  source = "market_bot_data"
+  destination = "/data"
+  initial_size = "1gb"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  # /ready verifies the DB volume is mounted and queryable. /health is a
+  # cheaper liveness probe — we use /ready here so failing it pulls the
+  # instance from the load balancer instead of serving broken traffic.
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "15s"
+    method = "GET"
+    path = "/ready"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -24,7 +25,12 @@ for source_dir in (ENGINE_SRC, IDENTITY_SRC, PORTFOLIO_SRC, REFERENCE_SRC):
 from market_bot import Horizon, MarketBotService, ProfileFilter  # noqa: E402
 from market_bot.config import is_cedear_ticker  # noqa: E402
 from market_bot.data import MarketDataError  # noqa: E402
-from market_identity import AuthenticatedUser, IdentityService  # noqa: E402
+from market_identity import (  # noqa: E402
+    AuthenticatedUser,
+    IdentityService,
+    list_decisions,
+    record_decision,
+)
 from market_identity.service import IdentityError  # noqa: E402
 from market_portfolio import BalanzImportSkip, PortfolioError, PortfolioService, parse_balanz_extract  # noqa: E402
 from market_reference import (  # noqa: E402
@@ -39,6 +45,8 @@ from .schemas import (  # noqa: E402
     BalanzImportResponse,
     BalanzImportSkipResponse,
     CreatePositionRequest,
+    DecisionRequest,
+    DecisionResponse,
     EarningsEventResponse,
     HealthResponse,
     InvestorProfileResponse,
@@ -52,9 +60,11 @@ from .schemas import (  # noqa: E402
     ProfileUpdateRequest,
     RankingItemResponse,
     RegisterRequest,
+    ReliabilityBinResponse,
     SessionResponse,
     TickerAnalysisResponse,
     UniverseItemResponse,
+    ValidationReportResponse,
 )
 
 app = FastAPI(
@@ -78,15 +88,60 @@ MARKET_OVERVIEW_UNIVERSE = (
     {"symbol": "^TNX", "label": "UST 10Y", "category": "rates"},
 )
 
+# CORS origins are configurable via env vars so production can lock down the
+# allowed domains while local dev keeps the permissive default. Preview
+# deployments on Vercel need regex support because Starlette does not expand
+# wildcard subdomains inside ``allow_origins``.
+_raw_cors = os.getenv("CORS_ALLOW_ORIGINS", "*").strip()
+if _raw_cors == "*" or not _raw_cors:
+    _cors_origins: list[str] = ["*"]
+else:
+    _cors_origins = [origin.strip() for origin in _raw_cors.split(",") if origin.strip()]
+_cors_origin_regex = os.getenv("CORS_ALLOW_ORIGIN_REGEX", "").strip() or None
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
+    allow_origin_regex=_cors_origin_regex,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Structured JSON request logging + per-request UUID. Middleware order is
+# innermost-first, so attaching this **after** CORS means it logs every HTTP
+# request (including CORS preflights).
+from .logging_config import (  # noqa: E402
+    install_request_logging,
+    rate_limit,
+)
+
+install_request_logging(app)
+
+# Boot log so we can confirm deploy-time configuration without digging.
+from .logging_config import configure_logger  # noqa: E402
+
+configure_logger().info(
+    "boot",
+    extra={
+        "db_path": os.getenv("MARKET_BOT_DB_PATH", "<default>"),
+        "cors_origins": _cors_origins,
+        "cors_origin_regex": _cors_origin_regex,
+        "fly_region": os.getenv("FLY_REGION", "local"),
+        "fly_app": os.getenv("FLY_APP_NAME", ""),
+    },
+)
+
+# Rate limit dependencies — declared once so the same instances are reused.
+LOGIN_RATE_LIMIT = rate_limit(key="auth_login", max_hits=5, window_seconds=15 * 60)
+REGISTER_RATE_LIMIT = rate_limit(key="auth_register", max_hits=3, window_seconds=60 * 60)
+ANALYZE_RATE_LIMIT = rate_limit(key="analyze", max_hits=30, window_seconds=60)
+
 app.mount("/app", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+
+
+def _frontend_entrypoint_exists() -> bool:
+    return (FRONTEND_DIR / "index.html").exists()
 
 
 def _extract_bearer_token(authorization: Optional[str]) -> str:
@@ -121,15 +176,44 @@ def get_optional_user(authorization: Optional[str] = Header(default=None, alias=
 
 @app.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
-    return RedirectResponse(url="/app/")
+    if _frontend_entrypoint_exists():
+        return RedirectResponse(url="/app/")
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
+    """Liveness probe — always returns 200 if the process is up."""
     return HealthResponse(status="ok", service="market-bot-api")
 
 
-@app.post("/auth/register", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
+@app.get("/ready", response_model=HealthResponse)
+def ready() -> HealthResponse:
+    """Readiness probe — verifies the DB is queryable.
+
+    Fly.io and most orchestrators check this to decide if the instance can
+    receive traffic. We keep it cheap (one PRAGMA), but if the DB volume
+    isn't mounted yet, this fails and the deploy is rolled back.
+    """
+    from market_identity.store import connection
+
+    try:
+        with connection() as conn:
+            conn.execute("PRAGMA quick_check").fetchone()
+    except Exception as exc:  # noqa: BLE001 — broad catch is intentional here
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"DB no esta disponible: {exc}",
+        ) from exc
+    return HealthResponse(status="ready", service="market-bot-api")
+
+
+@app.post(
+    "/auth/register",
+    response_model=SessionResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(REGISTER_RATE_LIMIT)],
+)
 def register(request: RegisterRequest) -> SessionResponse:
     try:
         session = identity_service.register_user(
@@ -151,7 +235,11 @@ def register(request: RegisterRequest) -> SessionResponse:
     )
 
 
-@app.post("/auth/login", response_model=SessionResponse)
+@app.post(
+    "/auth/login",
+    response_model=SessionResponse,
+    dependencies=[Depends(LOGIN_RATE_LIMIT)],
+)
 def login(request: LoginRequest) -> SessionResponse:
     try:
         session = identity_service.login_user(request.username, request.password)
@@ -337,7 +425,11 @@ def current_benchmarks(
     return PeriodBenchmarkResponse.model_validate(period, from_attributes=True)
 
 
-@app.post("/analyze", response_model=TickerAnalysisResponse)
+@app.post(
+    "/analyze",
+    response_model=TickerAnalysisResponse,
+    dependencies=[Depends(ANALYZE_RATE_LIMIT)],
+)
 def analyze(request: AnalyzeRequest) -> TickerAnalysisResponse:
     try:
         analysis = service.analyze_ticker(request.ticker.upper(), Horizon(request.horizon))
@@ -385,6 +477,124 @@ def rankings(
             why_for_you=reasons,
         )
         for analysis, score, reasons in ranked
+    ]
+
+
+@app.get("/validation/{ticker}", response_model=ValidationReportResponse)
+def validation_report(
+    ticker: str,
+    horizon: str = Query(default="short", pattern="^(short|long)$"),
+    horizon_days: int = Query(default=5, ge=1, le=60),
+    warmup: int = Query(default=60, ge=10, le=400),
+    step_days: int = Query(default=5, ge=1, le=20),
+) -> ValidationReportResponse:
+    """Run walk-forward calibration for ``ticker`` and return Brier metrics.
+
+    Public on purpose — it's a "track record of the engine" view that helps
+    a sceptical user decide whether to trust the model at all.
+    """
+    try:
+        result = service.validate_ticker(
+            ticker.upper(),
+            Horizon(horizon),
+            warmup=warmup,
+            horizon_days=horizon_days,
+            step_days=step_days,
+        )
+    except MarketDataError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return ValidationReportResponse(
+        ticker=ticker.upper(),
+        horizon=horizon,
+        warmup=warmup,
+        horizon_days=horizon_days,
+        step_days=step_days,
+        sample_size=result.sample_size,
+        brier_score=result.brier_score,
+        reliability_bins=[
+            ReliabilityBinResponse(
+                bin_lower=b.bin_lower,
+                bin_upper=b.bin_upper,
+                sample_size=b.sample_size,
+                mean_predicted=b.mean_predicted,
+                fraction_positive=b.fraction_positive,
+            )
+            for b in result.reliability_bins
+        ],
+    )
+
+
+@app.post("/decisions", response_model=DecisionResponse, status_code=status.HTTP_201_CREATED)
+def create_decision(
+    request: DecisionRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> DecisionResponse:
+    """Record a user-confirmed decision against a fresh analysis snapshot.
+
+    We re-run :meth:`MarketBotService.analyze_ticker` here rather than trust
+    the client to hand us the snapshot. The persisted JSON becomes the
+    ground-truth input for the future calibration pipeline.
+    """
+    try:
+        analysis = service.analyze_ticker(request.ticker.upper(), Horizon(request.horizon))
+    except MarketDataError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    primary_action = analysis.actions[0] if analysis.actions else None
+    conviction = float(primary_action.conviction) if primary_action is not None else None
+
+    snapshot_payload = TickerAnalysisResponse.model_validate(analysis, from_attributes=True).model_dump(mode="json")
+    record = record_decision(
+        user_id=current_user.user_id,
+        ticker=request.ticker.upper(),
+        horizon=request.horizon,
+        action_taken=request.action_taken,
+        analysis_snapshot=snapshot_payload,
+        conviction=conviction,
+        rationale=request.rationale,
+    )
+    return DecisionResponse(
+        decision_id=record.decision_id,
+        ticker=record.ticker,
+        horizon=record.horizon,
+        action_taken=record.action_taken,
+        conviction=record.conviction,
+        rationale=record.rationale,
+        decided_at=record.decided_at,
+        realized_return=record.realized_return,
+        realized_at=record.realized_at,
+        analysis_snapshot=record.analysis_snapshot,
+    )
+
+
+@app.get("/decisions", response_model=list[DecisionResponse])
+def list_my_decisions(
+    since: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    ticker: Optional[str] = Query(default=None, min_length=1, max_length=16),
+    limit: int = Query(default=50, ge=1, le=200),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> list[DecisionResponse]:
+    since_date = PathDateParser.parse(since) if since else None
+    records = list_decisions(
+        current_user.user_id,
+        since=since_date,
+        ticker=ticker.upper() if ticker else None,
+        limit=limit,
+    )
+    return [
+        DecisionResponse(
+            decision_id=record.decision_id,
+            ticker=record.ticker,
+            horizon=record.horizon,
+            action_taken=record.action_taken,
+            conviction=record.conviction,
+            rationale=record.rationale,
+            decided_at=record.decided_at,
+            realized_return=record.realized_return,
+            realized_at=record.realized_at,
+            analysis_snapshot=record.analysis_snapshot,
+        )
+        for record in records
     ]
 
 
