@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class ChatProviderInfo(BaseModel):
     id: str
+    label: str
     configured: bool
     model: str
 
@@ -23,6 +24,10 @@ class ChatThreadCreateRequest(BaseModel):
     title: Optional[str] = Field(default=None, max_length=120)
     provider: Optional[str] = Field(default=None, max_length=32)
     model: Optional[str] = Field(default=None, max_length=80)
+
+
+class ChatThreadUpdateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
 
 
 class ChatThreadResponse(BaseModel):

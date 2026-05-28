@@ -14,6 +14,12 @@ from .providers.base import ChatProvider
 from .providers.gemini_provider import GeminiChatProvider
 from .providers.openai_provider import OpenAIChatProvider
 
+PROVIDER_LABELS = {
+    "anthropic": "Claude",
+    "gemini": "Buffy",
+    "openai": "OpenAI",
+}
+
 
 class ChatRouterError(RuntimeError):
     """Raised when no provider can handle a request (unknown name, none configured...)."""
@@ -48,6 +54,7 @@ class ChatRouter:
         return [
             {
                 "id": provider.name,
+                "label": PROVIDER_LABELS.get(provider.name, provider.name),
                 "configured": provider.is_configured(),
                 "model": getattr(provider, "_model", provider.default_model),
             }

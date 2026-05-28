@@ -125,6 +125,29 @@ def test_portfolio_prefetch_quotes_swallows_download_exception(monkeypatch):
     assert service._quote_cache.get("AAPL") is None
 
 
+def test_portfolio_prefetch_quotes_normalizes_share_class_symbols(monkeypatch):
+    """Internal BRK.B should fetch BRK-B from yfinance but cache under BRK.B."""
+    from market_portfolio.service import PortfolioService
+    from market_bot.utils import TTLCache
+
+    service = PortfolioService.__new__(PortfolioService)
+    service._quote_cache = TTLCache(ttl_seconds=900)
+
+    captured: dict[str, object] = {}
+
+    def fake_download(tickers, **kwargs):
+        captured["tickers"] = tickers
+        return _make_multi_ticker_frame(["BRK-B"])
+
+    monkeypatch.setitem(sys.modules, "yfinance", type(sys)("yfinance"))
+    sys.modules["yfinance"].download = fake_download  # type: ignore[attr-defined]
+
+    service.prefetch_quotes(["BRK.B"])
+
+    assert captured["tickers"] == ["BRK-B"]
+    assert service._quote_cache.get("BRK.B") is not None
+
+
 def test_engine_prefetch_universe_warms_price_cache(monkeypatch):
     """Adapter prefetch must populate _price_cache for the full universe."""
     from market_bot.contracts import Horizon

@@ -7,7 +7,15 @@ regression there can't slip past CI unnoticed.
 
 from __future__ import annotations
 
-from market_portfolio.cedears import resolve_cedear_reference
+import importlib
+
+from market_portfolio.cedears import (
+    build_byma_symbol,
+    canonical_cedear_ratio,
+    clear_cedear_catalog_cache,
+    resolve_cedear_reference,
+    to_market_data_symbol,
+)
 
 
 def test_user_supplied_ratio_wins():
@@ -37,7 +45,7 @@ def test_canonical_table_beats_parity_inference():
         local_price_ars=21500.0,
         underlying_price_usd=180.0,
     )
-    assert ref.ratio_source == "canonical"
+    assert ref.ratio_source == "builtin_canonical"
     assert ref.cedear_ratio == 10.0
 
 
@@ -98,7 +106,7 @@ def test_known_ticker_hits_canonical_even_without_price_legs():
         local_price_ars=None,
         underlying_price_usd=None,
     )
-    assert ref.ratio_source == "canonical"
+    assert ref.ratio_source == "builtin_canonical"
     assert ref.cedear_ratio == 10.0
 
 
@@ -125,3 +133,89 @@ def test_byma_symbol_strips_trailing_ba_suffix():
     )
     # build_byma_symbol normalises both .BA and dot variations.
     assert ref.byma_symbol == "NVDA.BA"
+
+
+def test_external_reference_file_overrides_builtin_ratio(tmp_path, monkeypatch):
+    reference_file = tmp_path / "cedears.csv"
+    reference_file.write_text(
+        "Ticker,Empresa,Ratio,Pais,Sector,Tipo,ISIN CEDEAR\n"
+        "AAPL,APPLE INC.,20:1,Estados Unidos,Tecnologia,CEDEAR,ARTEST0001\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MARKET_BOT_CEDEAR_REFERENCE_FILE", str(reference_file))
+    clear_cedear_catalog_cache()
+    try:
+        assert canonical_cedear_ratio("AAPL") == 20.0
+        ref = resolve_cedear_reference(
+            symbol="AAPL",
+            underlying_ticker="AAPL",
+            user_ratio=None,
+            current_ccl=None,
+            local_price_ars=None,
+            underlying_price_usd=None,
+        )
+        assert ref.ratio_source == "reference_file"
+        assert ref.cedear_ratio == 20.0
+    finally:
+        monkeypatch.delenv("MARKET_BOT_CEDEAR_REFERENCE_FILE", raising=False)
+        clear_cedear_catalog_cache()
+
+
+def test_external_reference_file_keeps_distinct_ratios_per_ticker(tmp_path, monkeypatch):
+    reference_file = tmp_path / "cedears.csv"
+    reference_file.write_text(
+        "Ticker,Empresa,Ratio,Pais,Sector,Tipo,ISIN CEDEAR\n"
+        "AAPL,APPLE INC.,20:1,Estados Unidos,Tecnologia,CEDEAR,ARTEST0001\n"
+        "MSFT,MICROSOFT CORP.,30:1,Estados Unidos,Tecnologia,CEDEAR,ARTEST0002\n"
+        "MELI,MERCADOLIBRE INC.,120:1,Argentina,Consumo,CEDEAR,ARTEST0003\n"
+        "BRK/B,BERKSHIRE HATHAWAY,22:1,Estados Unidos,Finanzas,CEDEAR,ARTEST0004\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MARKET_BOT_CEDEAR_REFERENCE_FILE", str(reference_file))
+    clear_cedear_catalog_cache()
+    try:
+        assert canonical_cedear_ratio("AAPL") == 20.0
+        assert canonical_cedear_ratio("MSFT") == 30.0
+        assert canonical_cedear_ratio("MELI") == 120.0
+        assert canonical_cedear_ratio("BRK/B") == 22.0
+        assert len(
+            {
+                canonical_cedear_ratio("AAPL"),
+                canonical_cedear_ratio("MSFT"),
+                canonical_cedear_ratio("MELI"),
+                canonical_cedear_ratio("BRK/B"),
+            }
+        ) == 4
+    finally:
+        monkeypatch.delenv("MARKET_BOT_CEDEAR_REFERENCE_FILE", raising=False)
+        clear_cedear_catalog_cache()
+
+
+def test_share_class_symbols_normalize_for_byma_and_market_data():
+    assert build_byma_symbol("BRK/B") == "BRKB.BA"
+    assert build_byma_symbol("BRK.B") == "BRKB.BA"
+    assert to_market_data_symbol("BRK/B") == "BRK-B"
+    assert to_market_data_symbol("BRK.B") == "BRK-B"
+
+
+def test_engine_detects_external_cedear_without_expanding_static_universe(tmp_path, monkeypatch):
+    reference_file = tmp_path / "cedears.csv"
+    reference_file.write_text(
+        "Ticker,Empresa,Ratio,Pais,Sector,Tipo,ISIN CEDEAR\n"
+        "TLT,ISHARES 20+ YEAR TREASURY BOND ETF,4:1,Estados Unidos,Renta fija,CEDEAR,ARTEST0005\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MARKET_BOT_CEDEAR_REFERENCE_FILE", str(reference_file))
+    clear_cedear_catalog_cache()
+    try:
+        import market_bot.config as market_config
+
+        market_config = importlib.reload(market_config)
+        assert market_config.is_cedear_ticker("TLT") is True
+        assert "TLT" not in market_config.CEDEAR_UNIVERSE
+    finally:
+        monkeypatch.delenv("MARKET_BOT_CEDEAR_REFERENCE_FILE", raising=False)
+        clear_cedear_catalog_cache()
+        import market_bot.config as market_config
+
+        importlib.reload(market_config)

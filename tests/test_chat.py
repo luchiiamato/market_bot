@@ -194,6 +194,28 @@ def test_store_create_thread_append_and_list_messages(_reset_db, monkeypatch):
     assert usage["by_provider"][0]["message_count"] == 1
 
 
+def test_store_update_and_delete_thread(_reset_db):
+    from market_identity.service import IdentityService
+    from market_chat import create_thread, delete_thread, get_thread, update_thread_title
+
+    identity = IdentityService()
+    session = identity.register_user(
+        username="threadops",
+        password="secret123",
+        display_name="Thread Ops",
+    )
+    user_id = session.profile.user_id
+
+    thread = create_thread(user_id, "Hilo original")
+    updated = update_thread_title(thread.id, user_id, "Etiqueta nueva")
+    assert updated is not None
+    assert updated.title == "Etiqueta nueva"
+
+    assert delete_thread(thread.id, user_id) is True
+    assert get_thread(thread.id, user_id) is None
+    assert delete_thread(thread.id, user_id) is False
+
+
 # ---------------------------------------------------------------------------
 # API integration
 # ---------------------------------------------------------------------------
@@ -219,7 +241,7 @@ def test_api_chat_providers_endpoint(api_client, auth_headers, monkeypatch):
     response = api_client.get("/chat/providers")
     assert response.status_code == 200
     payload = response.json()
-    assert payload == [{"id": "anthropic", "configured": True, "model": "fake-model"}]
+    assert payload == [{"id": "anthropic", "label": "Claude", "configured": True, "model": "fake-model"}]
 
 
 def test_api_chat_thread_message_roundtrip(api_client, auth_headers, monkeypatch):
@@ -252,7 +274,7 @@ def test_api_chat_thread_message_roundtrip(api_client, auth_headers, monkeypatch
     assert fake.calls, "Provider was never called"
     last_call = fake.calls[-1]
     assert last_call["messages"][-1].content == "¿Qué hago con AAPL?"
-    assert last_call["system"] and "asistente para un terminal de inversión" in last_call["system"]
+    assert last_call["system"] and "Market Bot" in last_call["system"]
 
     # GET messages returns both turns.
     list_response = api_client.get(
@@ -268,6 +290,38 @@ def test_api_chat_unknown_thread_returns_404(api_client, auth_headers, monkeypat
     _install_fake_router(monkeypatch)
     response = api_client.get("/chat/threads/9999/messages", headers=auth_headers)
     assert response.status_code == 404
+
+
+def test_api_chat_thread_rename_and_delete(api_client, auth_headers, monkeypatch):
+    _install_fake_router(monkeypatch)
+
+    thread_id = api_client.post(
+        "/chat/threads",
+        json={"title": "Thread vieja"},
+        headers=auth_headers,
+    ).json()["id"]
+
+    rename_response = api_client.patch(
+        f"/chat/threads/{thread_id}",
+        json={"title": "Tecnologia USA"},
+        headers=auth_headers,
+    )
+    assert rename_response.status_code == 200, rename_response.text
+    assert rename_response.json()["title"] == "Tecnologia USA"
+
+    list_response = api_client.get("/chat/threads", headers=auth_headers)
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["title"] == "Tecnologia USA"
+
+    delete_response = api_client.delete(
+        f"/chat/threads/{thread_id}",
+        headers=auth_headers,
+    )
+    assert delete_response.status_code == 204, delete_response.text
+
+    list_after_delete = api_client.get("/chat/threads", headers=auth_headers)
+    assert list_after_delete.status_code == 200
+    assert list_after_delete.json() == []
 
 
 def test_api_chat_rate_limit_blocks_21st_message(api_client, auth_headers, monkeypatch):
@@ -321,3 +375,76 @@ def test_api_chat_usage_aggregates_cost(api_client, auth_headers, monkeypatch):
     assert usage["total_cost_usd"] == pytest.approx(0.03)
     assert usage["by_provider"][0]["provider"] == "anthropic"
     assert usage["by_provider"][0]["message_count"] == 3
+
+
+def test_api_chat_portfolio_question_injects_portfolio_context(api_client, auth_headers, monkeypatch):
+    from market_portfolio.models import ExposureBucket, PortfolioSummary
+    from services.api import app as app_module
+
+    fake = _install_fake_router(monkeypatch)
+    monkeypatch.setattr(
+        app_module.portfolio_service,
+        "portfolio_summary",
+        lambda user_id, benchmark_preference, risk_tolerance="medium": PortfolioSummary(
+            positions_count=2,
+            total_value_ars=18_501_660.0,
+            total_value_usd=14_850.0,
+            total_cost_ars=16_900_000.0,
+            total_cost_usd=13_900.0,
+            total_pnl_ars=1_601_660.0,
+            total_pnl_usd=950.0,
+            total_return_pct_ars=9.48,
+            total_return_pct_usd=6.83,
+            total_real_return_pct=1.36,
+            total_preferred_benchmark_return_pct=13.77,
+            preferred_benchmark_label="mep",
+            positions=[],
+            sector_exposure=[ExposureBucket(label="Tecnologia", total_value_ars=11_000_000.0, pct=0.594)],
+            region_exposure=[ExposureBucket(label="USA", total_value_ars=14_000_000.0, pct=0.757)],
+        ),
+    )
+
+    thread_id = api_client.post(
+        "/chat/threads",
+        json={"title": "Portfolio context"},
+        headers=auth_headers,
+    ).json()["id"]
+
+    send_response = api_client.post(
+        f"/chat/threads/{thread_id}/messages",
+        json={"role": "user", "content": "Resumime mi portfolio en 5 puntos"},
+        headers=auth_headers,
+    )
+    assert send_response.status_code == 201, send_response.text
+
+    last_call = fake.calls[-1]
+    assert "PORTFOLIO DEL USUARIO" in last_call["system"]
+    assert "Valor total ARS" in last_call["system"]
+    assert "Exposicion sectorial principal" in last_call["system"]
+
+
+def test_api_chat_concept_question_skips_portfolio_summary(api_client, auth_headers, monkeypatch):
+    from services.api import app as app_module
+
+    fake = _install_fake_router(monkeypatch)
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("portfolio_summary no deberia llamarse para una pregunta conceptual")
+
+    monkeypatch.setattr(app_module.portfolio_service, "portfolio_summary", _boom)
+
+    thread_id = api_client.post(
+        "/chat/threads",
+        json={"title": "Concept chat"},
+        headers=auth_headers,
+    ).json()["id"]
+
+    send_response = api_client.post(
+        f"/chat/threads/{thread_id}/messages",
+        json={"role": "user", "content": "Explicame que es ROIC"},
+        headers=auth_headers,
+    )
+    assert send_response.status_code == 201, send_response.text
+
+    last_call = fake.calls[-1]
+    assert "PORTFOLIO DEL USUARIO" not in last_call["system"]

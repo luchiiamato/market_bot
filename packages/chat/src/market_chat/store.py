@@ -18,9 +18,15 @@ from market_identity.store import connection
 
 
 SYSTEM_PROMPT_BASELINE = (
-    "Sos un asistente para un terminal de inversión. No das consejos específicos "
-    "de compra/venta. Mostrás datos. Si te preguntan 'qué hago', respondés con "
-    "marcos de decisión, no con un fallo binario."
+    "Sos el asistente de Market Bot, una terminal de inversión para usuarios de Argentina. "
+    "Respondés en español, con tono claro, corto y técnico. "
+    "Solo ayudás con: portfolio, CEDEARs, stocks, análisis técnico, métricas fundamentales, "
+    "earnings, benchmarks argentinos, noticias de mercado y conceptos financieros. "
+    "Si te preguntan algo fuera de ese dominio, redirigí en una sola frase al alcance de la herramienta. "
+    "No des consejos financieros personalizados ni órdenes directas de compra/venta. "
+    "Si te preguntan 'qué hago', respondé con marco de decisión, riesgos, datos a mirar y trade-offs. "
+    "Preferí bullets cortos cuando expliqués varios puntos. "
+    "No inventes datos, precios ni hechos; si falta contexto, decilo explícitamente."
 )
 
 
@@ -98,7 +104,7 @@ def create_thread(
 ) -> ChatThread:
     ensure_chat_schema()
     now = datetime.utcnow().isoformat()
-    clean_title = (title or "Nueva conversación").strip()[:120] or "Nueva conversación"
+    clean_title = _clean_thread_title(title)
     with connection() as conn:
         cursor = conn.execute(
             """
@@ -146,6 +152,34 @@ def get_thread(thread_id: int, user_id: int) -> ChatThread | None:
             (thread_id, user_id),
         ).fetchone()
     return _row_to_thread(row) if row else None
+
+
+def update_thread_title(thread_id: int, user_id: int, title: str) -> ChatThread | None:
+    ensure_chat_schema()
+    now = datetime.utcnow().isoformat()
+    clean_title = _clean_thread_title(title)
+    with connection() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE chat_threads
+            SET title = ?, updated_at = ?
+            WHERE id = ? AND user_id = ?
+            """,
+            (clean_title, now, thread_id, user_id),
+        )
+        if cursor.rowcount == 0:
+            return None
+    return get_thread(thread_id, user_id)
+
+
+def delete_thread(thread_id: int, user_id: int) -> bool:
+    ensure_chat_schema()
+    with connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM chat_threads WHERE id = ? AND user_id = ?",
+            (thread_id, user_id),
+        )
+    return bool(cursor.rowcount)
 
 
 def append_message(
@@ -321,6 +355,10 @@ def _row_to_thread(row) -> ChatThread:
         created_at=datetime.fromisoformat(str(row["created_at"])),
         updated_at=datetime.fromisoformat(str(row["updated_at"])),
     )
+
+
+def _clean_thread_title(title: str | None) -> str:
+    return (title or "Nueva conversación").strip()[:120] or "Nueva conversación"
 
 
 def _row_to_message(row) -> ChatMessageRow:

@@ -410,7 +410,7 @@ def test_benchmark_tracking_fx_uses_purchase_and_current_rates():
 
 
 def test_canonical_ratio_wins_over_parity_for_known_ticker():
-    """For tickers in the canonical table, ratio_source must be "canonical".
+    """For tickers in the builtin table, ratio_source must reflect that source.
 
     GOOGL's canonical ratio is 58. Parity inference at the prices below would
     snap to a much smaller candidate (~24), which is exactly the 2.4x USD-
@@ -425,7 +425,7 @@ def test_canonical_ratio_wins_over_parity_for_known_ticker():
         underlying_price_usd=180.0,
     )
 
-    assert ref.ratio_source == "canonical"
+    assert ref.ratio_source == "builtin_canonical"
     assert ref.cedear_ratio == pytest.approx(58.0)
 
 

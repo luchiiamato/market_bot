@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import csv
+import os
+import re
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 
 
 # Canonical CEDEAR ratios (CEDEARs per 1 underlying US share) sourced from
@@ -94,12 +99,114 @@ CANONICAL_CEDEAR_RATIOS: dict[str, float] = {
     "ALAB": 4.0,
 }
 
+CEDEAR_REFERENCE_FILE_ENV = "MARKET_BOT_CEDEAR_REFERENCE_FILE"
+_SHARE_CLASS_RE = re.compile(r"^([A-Z0-9]+)[./-]([A-Z])$")
+
+
+@dataclass(frozen=True)
+class CedearCatalogEntry:
+    symbol: str
+    cedear_ratio: float
+    company: str
+    instrument_type: str
+    country: str
+    sector: str
+    isin: str
+
+
+def normalize_cedear_symbol(symbol: str) -> str:
+    raw = str(symbol or "").strip().upper()
+    if raw.endswith(".BA"):
+        raw = raw[:-3]
+    match = _SHARE_CLASS_RE.match(raw.replace(" ", ""))
+    if match:
+        return f"{match.group(1)}.{match.group(2)}"
+    return raw
+
+
+def normalize_quote_symbol(symbol: str) -> str:
+    raw = str(symbol or "").strip().upper()
+    if raw.endswith(".BA"):
+        base = normalize_cedear_symbol(raw[:-3])
+        return build_byma_symbol(base)
+    return normalize_cedear_symbol(raw)
+
+
+def to_market_data_symbol(symbol: str) -> str:
+    normalized = normalize_quote_symbol(symbol)
+    if normalized.endswith(".BA"):
+        return normalized
+    match = _SHARE_CLASS_RE.match(normalized.replace(" ", ""))
+    if match:
+        return f"{match.group(1)}-{match.group(2)}"
+    return normalized
+
+
+@lru_cache(maxsize=1)
+def external_cedear_catalog() -> dict[str, CedearCatalogEntry]:
+    raw_path = os.getenv(CEDEAR_REFERENCE_FILE_ENV, "").strip()
+    if not raw_path:
+        return {}
+
+    path = Path(raw_path)
+    if not path.exists():
+        return {}
+
+    catalog: dict[str, CedearCatalogEntry] = {}
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            symbol = normalize_cedear_symbol(row.get("Ticker", ""))
+            ratio = _parse_ratio(row.get("Ratio", ""))
+            if not symbol or ratio is None or ratio <= 0:
+                continue
+            catalog[symbol] = CedearCatalogEntry(
+                symbol=symbol,
+                cedear_ratio=ratio,
+                company=str(row.get("Empresa", "") or "").strip(),
+                instrument_type=str(row.get("Tipo", "") or "").strip(),
+                country=str(row.get("País", "") or row.get("Pais", "") or "").strip(),
+                sector=str(row.get("Sector", "") or "").strip(),
+                isin=str(row.get("ISIN CEDEAR", "") or "").strip(),
+            )
+    return catalog
+
+
+def clear_cedear_catalog_cache() -> None:
+    external_cedear_catalog.cache_clear()
+
+
+def cedear_catalog_entry(symbol: str) -> CedearCatalogEntry | None:
+    normalized = normalize_cedear_symbol(symbol)
+    if not normalized:
+        return None
+    return external_cedear_catalog().get(normalized)
+
+
+def has_cedear_reference(symbol: str) -> bool:
+    normalized = normalize_cedear_symbol(symbol)
+    if not normalized:
+        return False
+    return normalized in external_cedear_catalog() or normalized in CANONICAL_CEDEAR_RATIOS
+
+
+def cedear_reference_source(symbol: str) -> str | None:
+    normalized = normalize_cedear_symbol(symbol)
+    if not normalized:
+        return None
+    if normalized in external_cedear_catalog():
+        return "reference_file"
+    if normalized in CANONICAL_CEDEAR_RATIOS:
+        return "builtin_canonical"
+    return None
+
 
 def canonical_cedear_ratio(symbol: str) -> float | None:
     """Return the BYMA-canonical ratio for ``symbol`` or None if unknown."""
-    if not symbol:
-        return None
-    normalized = symbol.strip().upper().replace(".BA", "")
+    entry = cedear_catalog_entry(symbol)
+    if entry is not None:
+        return entry.cedear_ratio
+    normalized = normalize_cedear_symbol(symbol)
     return CANONICAL_CEDEAR_RATIOS.get(normalized)
 
 
@@ -140,7 +247,13 @@ class CedearReference:
 
 
 def build_byma_symbol(symbol: str) -> str:
-    base_symbol = symbol.strip().upper().replace(".BA", "").replace(".", "")
+    base_symbol = (
+        normalize_cedear_symbol(symbol)
+        .replace(".", "")
+        .replace("/", "")
+        .replace("-", "")
+        .replace(" ", "")
+    )
     return f"{base_symbol}.BA"
 
 
@@ -164,8 +277,8 @@ def resolve_cedear_reference(
        can still render *something*, but flags it so the UI / valuation
        layer can warn loudly. Never silently trust this value.
     """
-    normalized_symbol = symbol.strip().upper().replace(".BA", "")
-    resolved_underlying = (underlying_ticker or normalized_symbol).strip().upper()
+    normalized_symbol = normalize_cedear_symbol(symbol)
+    resolved_underlying = normalize_cedear_symbol(underlying_ticker or normalized_symbol)
     byma_symbol = build_byma_symbol(normalized_symbol)
 
     if user_ratio is not None and user_ratio > 0:
@@ -180,6 +293,9 @@ def resolve_cedear_reference(
     # Canonical table is preferred over parity inference. Parity snaps to a
     # neighbour ratio and silently introduces multi-x errors (e.g. GOOGL real
     # ratio is 58, parity often computes ~24 which is a 2.4x error on USD).
+    canonical_source = cedear_reference_source(normalized_symbol) or cedear_reference_source(
+        resolved_underlying
+    )
     canonical = canonical_cedear_ratio(normalized_symbol) or canonical_cedear_ratio(
         resolved_underlying
     )
@@ -189,7 +305,7 @@ def resolve_cedear_reference(
             underlying_ticker=resolved_underlying,
             byma_symbol=byma_symbol,
             cedear_ratio=float(canonical),
-            ratio_source="canonical",
+            ratio_source=canonical_source or "builtin_canonical",
         )
 
     estimated_ratio = estimate_cedear_ratio(current_ccl, local_price_ars, underlying_price_usd)
@@ -209,6 +325,22 @@ def resolve_cedear_reference(
         cedear_ratio=1.0,
         ratio_source="fallback_default",
     )
+
+
+def _parse_ratio(raw_value: str | None) -> float | None:
+    value = str(raw_value or "").strip()
+    if not value:
+        return None
+    left, separator, right = value.partition(":")
+    try:
+        if separator:
+            denominator = float(right or 1)
+            if denominator <= 0:
+                return None
+            return round(float(left) / denominator, 6)
+        return float(value)
+    except ValueError:
+        return None
 
 
 def estimate_cedear_ratio(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -1150,6 +1151,123 @@ class PathDateParser:
         return date.today()
 
 
+CHAT_PORTFOLIO_KEYWORDS = (
+    "portfolio",
+    "cartera",
+    "posiciones",
+    "posicion",
+    "exposicion",
+    "rendimiento",
+    "ganancia",
+    "pnl",
+    "benchmark",
+    "benchmarks",
+    "cartera",
+    "holding",
+    "holdings",
+)
+
+
+def _normalize_chat_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFD", str(value or "").lower())
+    return normalized.encode("ascii", "ignore").decode("ascii")
+
+
+def _message_needs_portfolio_context(message_content: str) -> bool:
+    normalized = _normalize_chat_text(message_content)
+    return any(keyword in normalized for keyword in CHAT_PORTFOLIO_KEYWORDS)
+
+
+def _format_chat_money(value: float, currency: str) -> str:
+    prefix = "US$" if currency.upper() == "USD" else "$"
+    return f"{prefix}{value:,.2f}"
+
+
+def _format_chat_pct(value: float) -> str:
+    return f"{value:.2f}%"
+
+
+def _build_chat_profile_context(user_id: int) -> str:
+    profile = identity_service.get_profile(user_id)
+    return "\n".join(
+        [
+            "PERFIL DEL USUARIO:",
+            f"- Nombre visible: {profile.display_name}",
+            f"- Perfil inversor: {profile.investor_profile}",
+            f"- Horizonte preferido: {profile.preferred_horizon}",
+            f"- Instrumentos preferidos: {profile.preferred_instrument_types}",
+            f"- Tolerancia al riesgo: {profile.risk_tolerance}",
+            f"- Benchmark preferido: {profile.benchmark_preference}",
+            f"- Moneda local: {profile.local_currency}",
+        ]
+    )
+
+
+def _build_chat_portfolio_context(user_id: int) -> str:
+    profile = identity_service.get_profile(user_id)
+    summary = portfolio_service.portfolio_summary(
+        user_id,
+        profile.benchmark_preference,
+        risk_tolerance=profile.risk_tolerance,
+    )
+    if summary.positions_count == 0:
+        return "PORTFOLIO DEL USUARIO:\n- No hay posiciones cargadas todavia."
+
+    top_positions = sorted(summary.positions, key=lambda item: item.current_value_ars, reverse=True)[:3]
+    top_sectors = summary.sector_exposure[:3]
+    top_regions = summary.region_exposure[:3]
+
+    lines = [
+        "PORTFOLIO DEL USUARIO:",
+        f"- Posiciones cargadas: {summary.positions_count}",
+        f"- Valor total ARS: {_format_chat_money(summary.total_value_ars, 'ARS')}",
+        f"- Valor total USD: {_format_chat_money(summary.total_value_usd, 'USD')}",
+        f"- P&L ARS: {_format_chat_money(summary.total_pnl_ars, 'ARS')} ({_format_chat_pct(summary.total_return_pct_ars)})",
+        f"- P&L USD: {_format_chat_money(summary.total_pnl_usd, 'USD')} ({_format_chat_pct(summary.total_return_pct_usd)})",
+        f"- Retorno real vs inflacion: {_format_chat_pct(summary.total_real_return_pct)}",
+        f"- Retorno vs benchmark preferido ({summary.preferred_benchmark_label}): {_format_chat_pct(summary.total_preferred_benchmark_return_pct)}",
+    ]
+
+    if top_positions:
+        lines.append("- Principales posiciones por peso actual:")
+        for position in top_positions:
+            weight = (position.current_value_ars / summary.total_value_ars * 100) if summary.total_value_ars else 0.0
+            lines.append(
+                f"  - {position.symbol}: {_format_chat_money(position.current_value_ars, 'ARS')} | "
+                f"P&L {_format_chat_pct(position.return_pct_ars)} | peso {_format_chat_pct(weight)}"
+            )
+
+    if top_sectors:
+        sectors = ", ".join(f"{item.label} {_format_chat_pct(item.pct * 100)}" for item in top_sectors)
+        lines.append(f"- Exposicion sectorial principal: {sectors}")
+
+    if top_regions:
+        regions = ", ".join(f"{item.label} {_format_chat_pct(item.pct * 100)}" for item in top_regions)
+        lines.append(f"- Exposicion geografica principal: {regions}")
+
+    return "\n".join(lines)
+
+
+def _build_chat_system_prompt(current_user: AuthenticatedUser, message_content: str) -> str:
+    sections = [
+        SYSTEM_PROMPT_BASELINE,
+        _build_chat_profile_context(current_user.user_id),
+    ]
+    if _message_needs_portfolio_context(message_content):
+        try:
+            sections.append(_build_chat_portfolio_context(current_user.user_id))
+            sections.append(
+                "INSTRUCCION DE USO DEL CONTEXTO: si el usuario pregunta por su portfolio, "
+                "usa estos datos como fuente de verdad y evita responder de forma generica."
+            )
+        except Exception as exc:  # noqa: BLE001
+            sections.append(
+                "PORTFOLIO DEL USUARIO:\n"
+                f"- No se pudo cargar el resumen del portfolio en este momento ({exc})."
+            )
+    return "\n\n".join(section for section in sections if section)
+
+
 # ---------------------------------------------------------------------------
 # Chat (Sprint 8 + 8.5) — multi-provider chat with persistence, rate limit,
 # audit log and cost tracking. Providers and the router are imported lazily
@@ -1164,15 +1282,18 @@ from market_chat import (  # noqa: E402
     ChatRouter,
     ChatRouterError,
     ChatThreadCreateRequest,
+    ChatThreadUpdateRequest,
     ChatThreadResponse,
     ChatUsageResponse,
     SYSTEM_PROMPT_BASELINE,
     append_message,
     create_thread,
+    delete_thread,
     ensure_chat_schema,
     get_thread,
     list_messages,
     list_threads,
+    update_thread_title,
     usage_for_user,
 )
 from market_chat.schemas import ChatSendResponse  # noqa: E402
@@ -1210,6 +1331,35 @@ def list_chat_threads(
 ) -> list[ChatThreadResponse]:
     threads = list_threads(current_user.user_id)
     return [ChatThreadResponse.model_validate(t, from_attributes=True) for t in threads]
+
+
+@app.patch("/chat/threads/{thread_id}", response_model=ChatThreadResponse)
+def patch_chat_thread(
+    thread_id: int,
+    request: ChatThreadUpdateRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> ChatThreadResponse:
+    thread = update_thread_title(thread_id, current_user.user_id, request.title)
+    if thread is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversación no encontrada.",
+        )
+    return ChatThreadResponse.model_validate(thread, from_attributes=True)
+
+
+@app.delete("/chat/threads/{thread_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_chat_thread(
+    thread_id: int,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> Response:
+    deleted = delete_thread(thread_id, current_user.user_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversación no encontrada.",
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/chat/threads/{thread_id}/messages", response_model=list[ChatMessageResponse])
@@ -1285,11 +1435,12 @@ def post_chat_message(
         for row in history_rows
         if row.role in {"user", "assistant", "system"}
     ]
+    system_prompt = _build_chat_system_prompt(current_user, request.content)
 
     try:
         response = provider.chat(
             messages=history,
-            system=SYSTEM_PROMPT_BASELINE,
+            system=system_prompt,
             model=chosen_model,
         )
     except Exception as exc:  # noqa: BLE001 — surface SDK / network errors as 502

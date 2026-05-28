@@ -1315,3 +1315,102 @@ hover state genérico en radar cards (B10).
 12. **Sprint 6.3** Decision audit loop.
 13. **Sprint 6.5** Paper trading.
 14. Resto de Sprint 6.
+
+---
+
+## Queue recommendation — post beta local (2026-05-28)
+
+> Estado actual recomendado: **beta privada local usable**. La app ya tiene
+> portfolio, CEDEAR mapping mejorado, benchmarks ARG, import Balanz, Buffy,
+> learning y análisis consolidado. Lo siguiente no es “sumar features por sumar”:
+> es cerrar producto, performance y deploy en el orden correcto.
+
+### Bloque 1 · UX final `[ ]`
+
+**Objetivo**: que la app se sienta cerrada como producto y no como workspace acumulado.
+
+1. **Auth + navegación real**
+   - Pasar de hash/modal híbrido a rutas reales (`/login`, `/app`, `/portfolio`, `/learning`).
+   - Mantener `settings` arriba a la derecha como entrypoint único de cuenta.
+2. **Portfolio polish final**
+   - Mejorar lectura de `Resumen / Cargar / Posiciones`.
+   - Agregar agrupación por ticker cuando haya múltiples lotes.
+   - Sumar edición/borrado/historial de compras sin fricción.
+3. **Workspace simplification**
+   - Reducir `Market regime` a una lectura más ejecutiva.
+   - Hacer más clara la recomendación final: qué hacer, por qué, y con qué confianza.
+4. **Onboarding surface**
+   - Ajustar `How to use` y `Learning` para primera sesión real.
+
+**DoD**
+- Un usuario nuevo entiende dónde loguearse, dónde ver portfolio y cómo leer una sugerencia en menos de 5 minutos.
+- No quedan superficies ambiguas o duplicadas.
+
+### Bloque 2 · Performance + cleanup `[ ]`
+
+**Objetivo**: bajar fricción y tiempos percibidos antes de hostear.
+
+1. **Frontend**
+   - Seguir cortando trabajo al boot.
+   - Lazy-load de surfaces no críticas.
+   - Debounce y cancelación consistente en búsquedas y análisis.
+2. **API / engine**
+   - Medir y endurecer `analyze`, `rankings`, `market/overview`, `portfolio/summary`.
+   - Mantener cache server-side y evitar trabajo duplicado.
+3. **Data correctness cleanup**
+   - Seguir limpiando reglas de scoring/contexto.
+   - Mantener trazabilidad de ratios, catalysts y warnings.
+4. **Tests**
+   - Ampliar cobertura sobre portfolio/import/benchmark/chat/contexto.
+
+**DoD**
+- Carga inicial y navegación visiblemente más rápidas.
+- Endpoints pesados con latencia más estable.
+- Regresiones críticas cubiertas por tests.
+
+### Bloque 3 · Deploy-ready + producción básica `[ ]`
+
+**Objetivo**: pasar de demo local a app compartible con usuarios reales.
+
+1. **Base de datos**
+   - Migrar SQLite → Postgres.
+   - Agregar migraciones formales.
+2. **Configuración**
+   - Consolidar `.env`, `local/host`, CORS y secrets.
+3. **Hosting**
+   - Cerrar el split frontend/backend de forma estable.
+   - Completar Vercel + Fly o reemplazar por alternativa más simple si conviene.
+4. **Observabilidad + seguridad**
+   - Logs, rate limiting, readiness, backups básicos.
+
+**DoD**
+- URL pública estable.
+- Persistencia real.
+- Troubleshooting básico posible sin entrar a debug manual.
+
+### Bloque 4 · Motor y producto avanzado `[ ]`
+
+**Objetivo**: una vez cerrado lo anterior, recién ahí empujar inteligencia y trading.
+
+1. **Motor de recomendación**
+   - Mejor integración de técnico + noticias + earnings + macro + fundamentos.
+   - Explicación consolidada y auditada.
+2. **Decision loop**
+   - Track record del usuario y realized returns.
+3. **Paper trading / Wallbit prep**
+   - Primero sandbox.
+   - Después integración real.
+4. **Expansiones**
+   - Social sentiment.
+   - Ranking backtest.
+   - Push alerts.
+
+**DoD**
+- El sistema no solo sugiere, sino que permite medir si esas sugerencias sirvieron.
+
+### Orden sugerido desde ahora
+
+1. **Bloque 1** completo.
+2. **Bloque 2** casi completo.
+3. **Bloque 3**.
+4. **Bloque 4**.

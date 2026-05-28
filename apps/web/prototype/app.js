@@ -96,7 +96,7 @@ const state = {
   analysisRequestId: 0,
   rankingMode: window.localStorage.getItem("marketBotRankingMode") || "default",
   currentFx: null,
-  // ----- Asistente / Chat -----
+  // ----- Buffy / Chat -----
   chatInitialized: false,
   chatLoading: false,
   chatSending: false,
@@ -106,6 +106,9 @@ const state = {
   chatCurrentThreadId: window.localStorage.getItem("marketBotChatThreadId") || null,
   chatMessages: [],
   chatUsage: null,
+  chatEditingThreadId: null,
+  chatEditingTitle: "",
+  chatThreadBusyKey: null,
   chatRequestId: 0,
   chatError: null
 };
@@ -278,6 +281,91 @@ function setPortfolioImportStatus(message) {
   elements.portfolioImportStatus.textContent = message;
 }
 
+function cedearRatioSourceMeta(source) {
+  const normalized = String(source || "").trim().toLowerCase();
+  return {
+    reference_file: {
+      label: "Catalogo CEDEAR validado",
+      shortLabel: "Catalogo",
+      tone: "bull"
+    },
+    builtin_canonical: {
+      label: "Tabla interna validada",
+      shortLabel: "Validado",
+      tone: "bull"
+    },
+    canonical: {
+      label: "Tabla interna validada",
+      shortLabel: "Validado",
+      tone: "bull"
+    },
+    user_supplied: {
+      label: "Cargado por vos",
+      shortLabel: "Manual",
+      tone: "neutral"
+    },
+    estimated_market_parity: {
+      label: "Estimado por paridad",
+      shortLabel: "Paridad",
+      tone: "neutral"
+    },
+    fallback_default: {
+      label: "No verificado",
+      shortLabel: "Sin validar",
+      tone: "bear"
+    }
+  }[normalized] || {
+    label: "Origen no disponible",
+    shortLabel: "—",
+    tone: "neutral"
+  };
+}
+
+function summarizeCedearRatioCoverage(positions) {
+  const cedears = Array.isArray(positions)
+    ? positions.filter((position) => position.instrument_type === "cedear")
+    : [];
+  const summary = {
+    total: cedears.length,
+    verified: 0,
+    catalog: 0,
+    builtin: 0,
+    manual: 0,
+    estimated: 0,
+    fallback: 0
+  };
+
+  cedears.forEach((position) => {
+    const source = String(position.cedear_ratio_source || "").trim().toLowerCase();
+    if (source === "reference_file") {
+      summary.catalog += 1;
+      summary.verified += 1;
+    } else if (source === "builtin_canonical" || source === "canonical") {
+      summary.builtin += 1;
+      summary.verified += 1;
+    } else if (source === "user_supplied") {
+      summary.manual += 1;
+    } else if (source === "estimated_market_parity") {
+      summary.estimated += 1;
+    } else if (source === "fallback_default") {
+      summary.fallback += 1;
+    }
+  });
+
+  const detail = [];
+  if (summary.catalog > 0) detail.push(`Catalogo ${summary.catalog}`);
+  if (summary.builtin > 0) detail.push(`Tabla ${summary.builtin}`);
+  if (summary.manual > 0) detail.push(`Manual ${summary.manual}`);
+  if (summary.estimated > 0) detail.push(`Paridad ${summary.estimated}`);
+  if (summary.fallback > 0) detail.push(`Revisar ${summary.fallback}`);
+
+  return {
+    ...summary,
+    tone: summary.fallback > 0 ? "bear" : summary.estimated > 0 || summary.manual > 0 ? "neutral" : "bull",
+    detail: detail.join(" · ")
+  };
+}
+
 function readTimedCache(cache, key, ttlMs) {
   const cached = cache.get(key);
   if (!cached) return null;
@@ -408,6 +496,7 @@ function surfaceLabel(surface) {
     portfolio: "portfolio",
     howto: "how to use",
     learning: "learning",
+    chat: "Buffy",
     trading: "trading"
   };
   return labels[surface] || "workspace";
@@ -672,12 +761,7 @@ function renderDiagnostics(data) {
         const drift = Number(p.fx_drift_pct) || 0;
         const absDrift = Math.abs(drift);
         const tone = absDrift > 25 ? "bear" : absDrift > 10 ? "neutral" : "bull";
-        const ratioSourceLabel = {
-          user_supplied: "Manual",
-          canonical: "BYMA",
-          estimated_market_parity: "Paridad",
-          fallback_default: "⚠ Fallback"
-        }[p.ratio_source] || "—";
+        const ratioSourceLabel = cedearRatioSourceMeta(p.ratio_source);
 
         return `
           <tr class="diagnostics-row tone-${tone}">
@@ -686,7 +770,7 @@ function renderDiagnostics(data) {
             <td class="diagnostics-num">${(Number(p.quantity) || 0).toLocaleString("es-AR")}</td>
             <td>
               ${p.cedear_ratio ? `<strong>${p.cedear_ratio}:1</strong>` : "—"}
-              <span class="diagnostics-ratio-source">${escapeText(ratioSourceLabel)}</span>
+              <span class="diagnostics-ratio-source">${escapeText(ratioSourceLabel.shortLabel)}</span>
             </td>
             <td class="diagnostics-num">${formatMoney(p.current_price, p.current_price_currency || "ARS")}</td>
             <td class="diagnostics-num">${formatMoney(p.current_value_ars, "ARS", { magnitude: true })}</td>
@@ -713,7 +797,7 @@ function renderDiagnostics(data) {
 }
 
 // ============================================================
-// ----- Asistente / Chat module -------------------------------
+// ----- Buffy / Chat module -------------------------------
 // ============================================================
 // Lightweight chat surface backed by /chat/* endpoints. Handles
 // provider selection, thread list, message rendering with inline
@@ -725,16 +809,31 @@ function renderDiagnostics(data) {
 // paint the full assistant message when the POST resolves.
 
 const CHAT_QUICK_ACTIONS = [
-  "Analizame mi portfolio",
-  "¿Cómo viene NVDA?",
-  "Explicame qué es CAGR",
-  "Mostrame mi exposición sectorial"
+  "Resumime mi portfolio en 5 puntos",
+  "Que riesgos ves hoy para mi cartera",
+  "Como viene NVDA en corto plazo",
+  "Explicame que es ROIC"
 ];
 
 const CHAT_THREAD_KEY = "marketBotChatThreadId";
+const CHAT_PROVIDER_LABELS = {
+  anthropic: "Claude",
+  gemini: "Buffy",
+  openai: "OpenAI"
+};
 
 function chatEl(id) {
   return document.getElementById(id);
+}
+
+function currentChatProviderInfo() {
+  return (state.chatProviders || []).find((provider) => provider.id === state.chatCurrentProvider) || null;
+}
+
+function focusChatInput() {
+  const input = chatEl("chat-input");
+  if (!input) return;
+  window.requestAnimationFrame(() => input.focus());
 }
 
 async function initializeChat() {
@@ -749,18 +848,17 @@ async function initializeChat() {
     return;
   }
   state.chatLoading = true;
+  state.chatError = null;
   renderChatGateOrPanel();
   renderChatQuickActions();
   bindChatEventsOnce();
   try {
-    const [providers, threads, usage] = await Promise.all([
+    const [providers, threads] = await Promise.all([
       fetchJson("/chat/providers", { auth: true }).catch(() => []),
-      fetchJson("/chat/threads", { auth: true }).catch(() => []),
-      fetchJson("/chat/usage", { auth: true }).catch(() => null)
+      fetchJson("/chat/threads", { auth: true }).catch(() => [])
     ]);
     state.chatProviders = Array.isArray(providers) ? providers : [];
     state.chatThreads = Array.isArray(threads) ? threads : [];
-    state.chatUsage = usage || null;
 
     // Default provider: first configured, else first available.
     const configured = state.chatProviders.find((p) => p.configured);
@@ -779,12 +877,19 @@ async function initializeChat() {
       window.localStorage.removeItem(CHAT_THREAD_KEY);
     }
 
-    if (state.chatCurrentThreadId) {
-      await loadChatMessages(state.chatCurrentThreadId);
-    } else {
-      state.chatMessages = [];
-    }
     state.chatInitialized = true;
+    state.chatMessages = [];
+    renderChatGateOrPanel();
+    if (state.chatCurrentThreadId) {
+      loadChatMessages(state.chatCurrentThreadId)
+        .then(() => renderChatMessages())
+        .catch(() => {})
+        .finally(() => focusChatInput());
+    } else {
+      renderChatMessages();
+      focusChatInput();
+    }
+    refreshChatUsage();
   } catch (error) {
     state.chatError = error.message || String(error);
   } finally {
@@ -814,8 +919,8 @@ function renderChatGateOrPanel() {
   if (gated) {
     layout.innerHTML = `
       <div class="chat-gate" style="grid-column: 1 / -1;">
-        <strong>Para usar el asistente necesitás una sesión activa.</strong>
-        <p>Ingresá desde la cuenta y vas a poder conversar sobre tu portfolio, tickers y conceptos.</p>
+        <strong>Para usar Buffy necesitás una sesión activa.</strong>
+        <p>Ingresá desde la cuenta y vas a poder conversar sobre tu portfolio, tickers, CEDEARs, noticias y conceptos.</p>
       </div>
     `;
     return;
@@ -836,7 +941,7 @@ function renderChatGateOrPanel() {
         <form class="chat-composer" id="chat-composer">
           <textarea
             id="chat-input"
-            placeholder="Preguntale por tu portfolio, un ticker, un concepto..."
+            placeholder="Preguntale a Buffy por tu portfolio, un ticker o un concepto..."
             rows="2"
             autocomplete="off"
             spellcheck="false"
@@ -845,7 +950,7 @@ function renderChatGateOrPanel() {
             <span class="button-label">Enviar</span>
           </button>
         </form>
-        <p class="chat-disclaimer">Esto no es asesoramiento financiero. El asistente muestra datos y marcos de decisión, no recomendaciones específicas.</p>
+        <p class="chat-disclaimer">Esto no es asesoramiento financiero. Buffy resume contexto, riesgos y marcos de decision; no ejecuta ordenes ni da calls binarias.</p>
       </div>
     `;
     bindChatPanelEvents();
@@ -874,7 +979,8 @@ function renderChatProviders() {
   switcher.innerHTML = configured
     .map((p) => {
       const selected = p.id === state.chatCurrentProvider;
-      return `<button type="button" class="ranking-mode-pill${selected ? " is-selected" : ""}" data-chat-provider="${escapeAttribute(p.id)}">${escapeText(p.label || p.id)}</button>`;
+      const label = CHAT_PROVIDER_LABELS[p.id] || p.label || p.id;
+      return `<button type="button" class="ranking-mode-pill${selected ? " is-selected" : ""}" data-chat-provider="${escapeAttribute(p.id)}">${escapeText(label)}</button>`;
     })
     .join("");
   switcher.querySelectorAll("[data-chat-provider]").forEach((btn) => {
@@ -903,19 +1009,56 @@ function renderChatThreads() {
   list.innerHTML = threads
     .map((t) => {
       const isActive = String(t.id) === String(state.chatCurrentThreadId);
+      const isEditing = String(t.id) === String(state.chatEditingThreadId);
+      const isBusy = state.chatThreadBusyKey === `rename:${t.id}` || state.chatThreadBusyKey === `delete:${t.id}`;
       const dateLabel = formatChatDate(t.updated_at || t.created_at);
       const providerLabel = providerLabelFor(t.provider) || t.provider || "";
       const title = t.title || "Hilo sin título";
+      if (isEditing) {
+        return `
+          <li class="chat-thread-item">
+            <form class="chat-thread-edit-form" data-chat-thread-edit-form="${escapeAttribute(t.id)}">
+              <input
+                type="text"
+                class="chat-thread-edit-input"
+                data-chat-thread-edit-input="${escapeAttribute(t.id)}"
+                value="${escapeAttribute(state.chatEditingTitle || title)}"
+                maxlength="120"
+                placeholder="Etiqueta del hilo"
+                aria-label="Cambiar etiqueta de la conversación"
+              />
+              <div class="chat-thread-edit-actions">
+                <button type="submit" class="chat-thread-edit-button is-primary"${isBusy ? " disabled" : ""}>
+                  ${isBusy ? "Guardando..." : "Guardar"}
+                </button>
+                <button type="button" class="chat-thread-edit-button" data-chat-thread-cancel="${escapeAttribute(t.id)}"${isBusy ? " disabled" : ""}>
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </li>
+        `;
+      }
       return `
-        <li>
-          <button type="button" class="chat-thread-card${isActive ? " is-active" : ""}" data-chat-thread="${escapeAttribute(t.id)}">
-            <span class="chat-thread-card-kicker">${escapeText(t.model || providerLabel || "asistente")}</span>
-            <span class="chat-thread-card-title">${escapeText(title)}</span>
-            <span class="chat-thread-card-meta">
-              <span>${escapeText(dateLabel)}</span>
-              ${providerLabel ? `<span class="chat-thread-card-chip">${escapeText(providerLabel)}</span>` : ""}
-            </span>
-          </button>
+        <li class="chat-thread-item">
+          <div class="chat-thread-shell">
+            <button type="button" class="chat-thread-card${isActive ? " is-active" : ""}" data-chat-thread="${escapeAttribute(t.id)}">
+              <span class="chat-thread-card-kicker">${escapeText(t.model || providerLabel || "Buffy")}</span>
+              <span class="chat-thread-card-title">${escapeText(title)}</span>
+              <span class="chat-thread-card-meta">
+                <span>${escapeText(dateLabel)}</span>
+                ${providerLabel ? `<span class="chat-thread-card-chip">${escapeText(providerLabel)}</span>` : ""}
+              </span>
+            </button>
+            <div class="chat-thread-actions">
+              <button type="button" class="chat-thread-action" data-chat-thread-rename="${escapeAttribute(t.id)}"${isBusy ? " disabled" : ""}>
+                Etiquetar
+              </button>
+              <button type="button" class="chat-thread-action is-danger" data-chat-thread-delete="${escapeAttribute(t.id)}"${isBusy ? " disabled" : ""}>
+                ${state.chatThreadBusyKey === `delete:${t.id}` ? "Borrando..." : "Borrar"}
+              </button>
+            </div>
+          </div>
         </li>
       `;
     })
@@ -933,12 +1076,60 @@ function renderChatThreads() {
       renderChatMessages();
     });
   });
+  list.querySelectorAll("[data-chat-thread-rename]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const id = btn.dataset.chatThreadRename;
+      const thread = threads.find((item) => String(item.id) === String(id));
+      state.chatEditingThreadId = id;
+      state.chatEditingTitle = thread ? (thread.title || "") : "";
+      renderChatThreads();
+      const input = list.querySelector(`[data-chat-thread-edit-input="${String(id)}"]`);
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    });
+  });
+  list.querySelectorAll("[data-chat-thread-delete]").forEach((btn) => {
+    btn.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      await deleteChatThread(btn.dataset.chatThreadDelete);
+    });
+  });
+  list.querySelectorAll("[data-chat-thread-cancel]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.preventDefault();
+      state.chatEditingThreadId = null;
+      state.chatEditingTitle = "";
+      state.chatThreadBusyKey = null;
+      renderChatThreads();
+    });
+  });
+  list.querySelectorAll("[data-chat-thread-edit-form]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const id = form.dataset.chatThreadEditForm;
+      const input = form.querySelector("[data-chat-thread-edit-input]");
+      await renameChatThread(id, input ? input.value : "");
+    });
+  });
 }
 
 function providerLabelFor(providerId) {
   if (!providerId) return null;
   const found = (state.chatProviders || []).find((p) => p.id === providerId);
-  return found ? (found.label || found.id) : providerId;
+  return found ? (CHAT_PROVIDER_LABELS[found.id] || found.label || found.id) : (CHAT_PROVIDER_LABELS[providerId] || providerId);
+}
+
+function sortChatThreads(threads) {
+  return [...(threads || [])].sort((left, right) => {
+    const leftValue = new Date(left.updated_at || left.created_at || 0).getTime();
+    const rightValue = new Date(right.updated_at || right.created_at || 0).getTime();
+    return rightValue - leftValue;
+  });
 }
 
 function formatChatDate(iso) {
@@ -961,11 +1152,20 @@ function renderChatMessages() {
   const container = chatEl("chat-messages");
   if (!container) return;
   const messages = state.chatMessages || [];
+  if (state.chatLoading && messages.length === 0) {
+    container.innerHTML = `
+      <div class="chat-messages-empty is-loading" aria-live="polite">
+        <strong>Preparando a Buffy</strong>
+        <p>Cargando providers, hilos y contexto base.</p>
+      </div>
+    `;
+    return;
+  }
   if (messages.length === 0 && !state.chatSending) {
     container.innerHTML = `
       <div class="chat-messages-empty">
-        <strong>Empezá la conversación</strong>
-        <p>Tocá una acción rápida abajo o escribí tu pregunta. El asistente puede ayudarte con análisis, conceptos y revisión del portfolio.</p>
+        <strong>Empezá la conversación con Buffy</strong>
+        <p>Tocá una acción rápida abajo o escribí tu pregunta. Buffy puede ayudarte con análisis, riesgos, benchmarks, conceptos y lectura de portfolio.</p>
       </div>
     `;
     return;
@@ -1102,10 +1302,11 @@ function renderChatUsage() {
     return;
   }
   const total = Number(usage.total_cost_usd || 0).toFixed(4);
-  const byProvider = usage.by_provider || {};
-  const providerRows = Object.entries(byProvider)
-    .map(([provider, value]) => {
-      const cost = typeof value === "number" ? value : (value && value.cost_usd) || 0;
+  const byProvider = Array.isArray(usage.by_provider) ? usage.by_provider : [];
+  const providerRows = byProvider
+    .map((row) => {
+      const provider = row.provider || "";
+      const cost = row.cost_usd || 0;
       return `<div class="chat-usage-row"><span>${escapeText(providerLabelFor(provider) || provider)}</span><span>$${Number(cost).toFixed(4)}</span></div>`;
     })
     .join("");
@@ -1135,22 +1336,105 @@ function renderChatQuickActions() {
 async function createChatThread(title) {
   if (!state.accessToken) return;
   try {
-    const body = title ? { title } : {};
+    const provider = currentChatProviderInfo();
+    const body = {};
+    if (title) body.title = title;
+    if (state.chatCurrentProvider) body.provider = state.chatCurrentProvider;
+    if (provider && provider.model) body.model = provider.model;
     const thread = await fetchJson("/chat/threads", {
       method: "POST",
       auth: true,
       body: JSON.stringify(body)
     });
     if (!thread || !thread.id) return;
-    state.chatThreads = [thread, ...(state.chatThreads || [])];
+    state.chatThreads = sortChatThreads([thread, ...(state.chatThreads || [])]);
     state.chatCurrentThreadId = thread.id;
     window.localStorage.setItem(CHAT_THREAD_KEY, String(thread.id));
     state.chatMessages = [];
+    state.chatEditingThreadId = null;
+    state.chatEditingTitle = "";
     renderChatThreads();
     renderChatMessages();
     return thread;
   } catch (error) {
     state.chatError = error.message || String(error);
+    renderChatMessages();
+  }
+}
+
+async function renameChatThread(threadId, rawTitle) {
+  if (!state.accessToken || !threadId) return;
+  const title = String(rawTitle || "").trim();
+  if (!title) {
+    state.chatError = "La etiqueta del hilo no puede quedar vacia.";
+    renderChatMessages();
+    return;
+  }
+  state.chatThreadBusyKey = `rename:${threadId}`;
+  renderChatThreads();
+  try {
+    const updated = await fetchJson(`/chat/threads/${encodeURIComponent(threadId)}`, {
+      method: "PATCH",
+      auth: true,
+      body: JSON.stringify({ title })
+    });
+    state.chatThreads = sortChatThreads(
+      (state.chatThreads || []).map((thread) =>
+        String(thread.id) === String(threadId) ? updated : thread
+      )
+    );
+    state.chatEditingThreadId = null;
+    state.chatEditingTitle = "";
+    state.chatError = null;
+  } catch (error) {
+    state.chatError = error.message || String(error);
+  } finally {
+    state.chatThreadBusyKey = null;
+    renderChatThreads();
+    renderChatMessages();
+  }
+}
+
+async function deleteChatThread(threadId) {
+  if (!state.accessToken || !threadId) return;
+  const thread = (state.chatThreads || []).find((item) => String(item.id) === String(threadId));
+  const title = thread && thread.title ? thread.title : "esta conversación";
+  const confirmed = window.confirm(`Vas a borrar "${title}". Esta acción no se puede deshacer.`);
+  if (!confirmed) return;
+
+  state.chatThreadBusyKey = `delete:${threadId}`;
+  renderChatThreads();
+  try {
+    await fetchJson(`/chat/threads/${encodeURIComponent(threadId)}`, {
+      method: "DELETE",
+      auth: true
+    });
+    state.chatThreads = (state.chatThreads || []).filter((item) => String(item.id) !== String(threadId));
+    const deletedActive = String(state.chatCurrentThreadId) === String(threadId);
+    if (deletedActive) {
+      const nextThread = state.chatThreads[0] || null;
+      if (nextThread) {
+        state.chatCurrentThreadId = nextThread.id;
+        window.localStorage.setItem(CHAT_THREAD_KEY, String(nextThread.id));
+        state.chatMessages = [];
+        renderChatMessages();
+        await loadChatMessages(nextThread.id);
+      } else {
+        state.chatCurrentThreadId = null;
+        state.chatMessages = [];
+        window.localStorage.removeItem(CHAT_THREAD_KEY);
+      }
+    }
+    if (String(state.chatEditingThreadId) === String(threadId)) {
+      state.chatEditingThreadId = null;
+      state.chatEditingTitle = "";
+    }
+    state.chatError = null;
+  } catch (error) {
+    state.chatError = error.message || String(error);
+  } finally {
+    state.chatThreadBusyKey = null;
+    renderChatThreads();
     renderChatMessages();
   }
 }
@@ -1170,12 +1454,13 @@ async function sendChatMessage(content) {
   state.chatSending = true;
   state.chatRequestId += 1;
   const requestId = state.chatRequestId;
+  const optimisticId = `local-${requestId}`;
 
   // Optimistic user-message append.
   state.chatMessages = [
     ...state.chatMessages,
     {
-      id: `local-${requestId}`,
+      id: optimisticId,
       role: "user",
       content: trimmed,
       provider: state.chatCurrentProvider,
@@ -1196,6 +1481,11 @@ async function sendChatMessage(content) {
       body: JSON.stringify(payload)
     });
     if (requestId !== state.chatRequestId) return;
+    if (response && response.user_message) {
+      state.chatMessages = state.chatMessages.map((message) =>
+        String(message.id) === optimisticId ? response.user_message : message
+      );
+    }
     if (response && response.assistant_message) {
       state.chatMessages = [...state.chatMessages, response.assistant_message];
     }
@@ -1974,6 +2264,16 @@ function renderPortfolioSummary(summary) {
   const pnlArsTone = toneOf(summary.total_pnl_ars);
   const pnlUsdTone = toneOf(summary.total_pnl_usd);
   const realTone = toneOf(realReturnPct);
+  const ratioCoverage = summarizeCedearRatioCoverage(summary.positions);
+  const ratioCoverageBlock = ratioCoverage.total
+    ? `
+        <div class="satellite satellite-ratio-audit">
+          <span class="satellite-label">Ratios CEDEAR</span>
+          <strong class="satellite-value tone-${ratioCoverage.tone}">${ratioCoverage.verified}/${ratioCoverage.total} validados</strong>
+          <span class="satellite-subcopy">${escapeText(ratioCoverage.detail || "Todos los ratios tienen origen trazable.")}</span>
+        </div>
+      `
+    : "";
 
   elements.portfolioSummaryGrid.innerHTML = `
     <article class="portfolio-hero-summary">
@@ -2008,6 +2308,7 @@ function renderPortfolioSummary(summary) {
             <div class="real-return-bar-fill tone-${realTone}" style="width:${Math.min(Math.abs(realReturnPct) * 100 * 4, 100).toFixed(2)}%"></div>
           </div>
         </div>
+        ${ratioCoverageBlock}
       </div>
     </article>
   `;
@@ -2028,18 +2329,13 @@ function renderPortfolioSummary(summary) {
       const effectiveShares = position.instrument_type === "cedear" && ratio > 0
         ? position.quantity / ratio
         : null;
-      const ratioSourceLabel = {
-        user_supplied: { label: "Cargado por vos", tone: "neutral" },
-        canonical: { label: "BYMA oficial", tone: "bull" },
-        estimated_market_parity: { label: "Inferido por paridad", tone: "neutral" },
-        fallback_default: { label: "No verificado", tone: "bear" }
-      }[position.cedear_ratio_source] || { label: "Manual", tone: "neutral" };
+      const ratioSourceLabel = cedearRatioSourceMeta(position.cedear_ratio_source);
 
       const ratioLine = position.cedear_ratio
         ? `
           <div class="ratio-chip-stack">
             <span class="tone-chip">Ratio ${position.cedear_ratio}:1</span>
-            <span class="ratio-source-chip tone-${ratioSourceLabel.tone}">${escapeText(ratioSourceLabel.label)}</span>
+            <span class="ratio-source-chip tone-${ratioSourceLabel.tone}" title="${escapeText(ratioSourceLabel.label)}">${escapeText(ratioSourceLabel.shortLabel)}</span>
           </div>
         `
         : "";
@@ -3828,7 +4124,7 @@ elements.surfaceButtons.forEach((button) => {
   // Prefetch heavier surface bundles when the user hovers/focuses the tab,
   // so by the time they click, data is in cache. Currently only Learning
   // benefits (glossary.js is lazy-loaded). Future: chat module on
-  // pointerenter of an Asistente tab.
+  // pointerenter of the Buffy tab.
   if (button.dataset.surface === "learning") {
     const warm = () => ensureGlossaryLoaded();
     button.addEventListener("pointerenter", warm, { once: true });

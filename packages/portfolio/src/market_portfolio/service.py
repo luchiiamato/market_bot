@@ -12,7 +12,14 @@ from market_identity.store import connection
 from market_reference import ArgentinaBenchmarkError, ArgentinaBenchmarkService
 from market_reference.classification import aggregate_exposure
 
-from .cedears import CedearReference, build_byma_symbol, resolve_cedear_reference
+from .cedears import (
+    CedearReference,
+    build_byma_symbol,
+    normalize_cedear_symbol,
+    normalize_quote_symbol,
+    resolve_cedear_reference,
+    to_market_data_symbol,
+)
 from .models import (
     BenchmarkComparison,
     ExposureBucket,
@@ -213,7 +220,7 @@ class PortfolioService:
                     symbols_to_prefetch.append(local_symbol)
                 symbols_to_prefetch.append(record.underlying_ticker)
                 symbols_to_prefetch.append(record.symbol)
-            unique_symbols = list({s.strip().upper() for s in symbols_to_prefetch if s})
+            unique_symbols = list({normalize_quote_symbol(s) for s in symbols_to_prefetch if s})
             if unique_symbols:
                 self.prefetch_quotes(unique_symbols)
         except Exception:
@@ -240,7 +247,7 @@ class PortfolioService:
         Missing tickers in the batch response are simply skipped — the
         caller's ``_latest_close`` will fall back to a per-symbol fetch.
         """
-        normalized = sorted({s.strip().upper() for s in symbols if s and s.strip()})
+        normalized = sorted({normalize_quote_symbol(s) for s in symbols if s and s.strip()})
         # Skip symbols already cached (and still fresh).
         targets = [s for s in normalized if self._quote_cache.get(s) is None]
         if not targets:
@@ -253,8 +260,9 @@ class PortfolioService:
 
         started = time.perf_counter()
         try:
+            request_symbols = [to_market_data_symbol(symbol) for symbol in targets]
             frame = yf.download(
-                targets,
+                request_symbols,
                 period="10d",
                 interval="1d",
                 auto_adjust=True,
@@ -273,11 +281,13 @@ class PortfolioService:
 
         # Single-ticker response: flat columns. Multi-ticker: MultiIndex.
         if isinstance(frame.columns, pd.MultiIndex):
+            available = set(frame.columns.get_level_values(0))
             for symbol in targets:
-                if symbol not in frame.columns.get_level_values(0):
+                request_symbol = to_market_data_symbol(symbol)
+                if request_symbol not in available:
                     continue
                 try:
-                    sub = frame[symbol]
+                    sub = frame[request_symbol]
                 except KeyError:
                     continue
                 quote = _extract_latest_close(sub, symbol)
@@ -699,12 +709,12 @@ class PortfolioService:
         if quantity <= 0 or purchase_price <= 0:
             raise PortfolioError("Cantidad y precio de compra deben ser positivos.")
 
-        normalized_symbol = symbol.strip().upper()
+        normalized_symbol = normalize_cedear_symbol(symbol)
         normalized_currency = purchase_currency.strip().upper()
         ratio_value = None
         ratio_source = None
         byma_symbol = None
-        resolved_underlying = (underlying_ticker or normalized_symbol).strip().upper()
+        resolved_underlying = normalize_cedear_symbol(underlying_ticker or normalized_symbol)
 
         if normalized_type == "cedear":
             current_ccl = self.benchmark_service.get_current_exchange_rates().ccl
@@ -787,7 +797,7 @@ class PortfolioService:
         return comparisons
 
     def _latest_close(self, ticker: str) -> tuple[float, date]:
-        normalized_ticker = ticker.strip().upper()
+        normalized_ticker = normalize_quote_symbol(ticker)
         cached = self._quote_cache.get(normalized_ticker)
         if cached is not None:
             return cached
@@ -798,7 +808,7 @@ class PortfolioService:
             raise PortfolioError("yfinance no esta instalado para valuar posiciones.") from exc
 
         frame = yf.download(
-            normalized_ticker,
+            to_market_data_symbol(normalized_ticker),
             period="10d",
             interval="1d",
             auto_adjust=True,

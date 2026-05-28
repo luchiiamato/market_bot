@@ -4,6 +4,13 @@ from dataclasses import dataclass
 
 from .contracts import Horizon
 
+try:
+    from market_portfolio.cedears import external_cedear_catalog, has_cedear_reference, normalize_cedear_symbol
+except Exception:  # pragma: no cover - engine can still run without portfolio package
+    external_cedear_catalog = None
+    has_cedear_reference = None
+    normalize_cedear_symbol = None
+
 
 @dataclass(frozen=True)
 class HorizonConfig:
@@ -18,7 +25,7 @@ HORIZON_CONFIG = {
 }
 
 
-CEDEAR_UNIVERSE = [
+STATIC_CEDEAR_UNIVERSE = [
     # Mega-caps / index
     "AAPL", "AMZN", "GOOGL", "META", "MSFT", "NVDA", "TSLA", "QQQ", "SPY",
     # Argentina ADRs (locales fuertes)
@@ -48,6 +55,9 @@ CEDEAR_UNIVERSE = [
 ]
 
 
+CEDEAR_UNIVERSE = list(STATIC_CEDEAR_UNIVERSE)
+
+
 DEFAULT_UNIVERSE = [
     "AAPL",
     "PLTR",
@@ -68,4 +78,9 @@ SUGGESTION_UNIVERSE = list(CEDEAR_UNIVERSE)
 
 
 def is_cedear_ticker(ticker: str) -> bool:
-    return ticker.upper() in CEDEAR_UNIVERSE
+    normalized = ticker.strip().upper()
+    if normalize_cedear_symbol is not None:
+        normalized = normalize_cedear_symbol(normalized)
+    if has_cedear_reference is not None and has_cedear_reference(normalized):
+        return True
+    return normalized in CEDEAR_UNIVERSE
