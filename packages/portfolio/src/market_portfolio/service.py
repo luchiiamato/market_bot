@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import asdict
 from datetime import date, datetime
 
@@ -8,9 +10,18 @@ import pandas as pd
 from market_bot.utils import TTLCache
 from market_identity.store import connection
 from market_reference import ArgentinaBenchmarkError, ArgentinaBenchmarkService
+from market_reference.classification import aggregate_exposure
 
 from .cedears import CedearReference, build_byma_symbol, resolve_cedear_reference
-from .models import BenchmarkComparison, PortfolioSummary, PositionRecord, PositionValuation
+from .models import (
+    BenchmarkComparison,
+    ExposureBucket,
+    PortfolioSummary,
+    PositionRecord,
+    PositionValuation,
+)
+
+logger = logging.getLogger("market_bot.api")
 
 
 class PortfolioError(RuntimeError):
@@ -20,7 +31,9 @@ class PortfolioError(RuntimeError):
 class PortfolioService:
     def __init__(self, benchmark_service: ArgentinaBenchmarkService | None = None) -> None:
         self.benchmark_service = benchmark_service or ArgentinaBenchmarkService()
-        self._quote_cache: TTLCache[tuple[float, date]] = TTLCache(ttl_seconds=300)
+        # 15-min TTL: yfinance daily closes are EOD, so caching ~quarter-hour
+        # is safe and cuts repeat /portfolio/summary calls to a no-op.
+        self._quote_cache: TTLCache[tuple[float, date]] = TTLCache(ttl_seconds=900)
         self._ensure_schema()
 
     def add_position(
@@ -184,14 +197,116 @@ class PortfolioService:
                 "SELECT * FROM positions WHERE user_id = ? ORDER BY purchase_date DESC, id DESC",
                 (user_id,),
             ).fetchall()
+        records = [_record_from_row(row) for row in rows]
+
+        # Single batched yfinance call warms the cache so each
+        # _build_position_valuation -> _latest_close becomes a cache hit.
+        # Wrapped in try/except: tests monkeypatch _latest_close and run
+        # offline, where the batch request would fail. A failure here
+        # must not break valuation — _latest_close will fall through to
+        # its own (mocked in tests) fetch.
+        try:
+            symbols_to_prefetch: list[str] = []
+            for record in records:
+                if record.instrument_type == "cedear":
+                    local_symbol = record.byma_symbol or build_byma_symbol(record.symbol)
+                    symbols_to_prefetch.append(local_symbol)
+                symbols_to_prefetch.append(record.underlying_ticker)
+                symbols_to_prefetch.append(record.symbol)
+            unique_symbols = list({s.strip().upper() for s in symbols_to_prefetch if s})
+            if unique_symbols:
+                self.prefetch_quotes(unique_symbols)
+        except Exception:
+            # Prefetch is a pure optimisation — never let it block valuation.
+            pass
+
         return [
             self._build_position_valuation(
-                _record_from_row(row),
+                record,
                 benchmark_preference,
                 risk_tolerance=risk_tolerance,
             )
-            for row in rows
+            for record in records
         ]
+
+    def prefetch_quotes(self, symbols: list[str]) -> None:
+        """Warm ``self._quote_cache`` with one batched yfinance call.
+
+        yfinance's ``download`` accepts a list of tickers and parallelises
+        internally. With multi-ticker downloads the column index becomes a
+        MultiIndex of ``(field, ticker)``; with a single ticker it stays
+        flat. Both shapes are handled below.
+
+        Missing tickers in the batch response are simply skipped — the
+        caller's ``_latest_close`` will fall back to a per-symbol fetch.
+        """
+        normalized = sorted({s.strip().upper() for s in symbols if s and s.strip()})
+        # Skip symbols already cached (and still fresh).
+        targets = [s for s in normalized if self._quote_cache.get(s) is None]
+        if not targets:
+            return
+
+        try:
+            import yfinance as yf  # type: ignore
+        except ModuleNotFoundError:
+            return
+
+        started = time.perf_counter()
+        try:
+            frame = yf.download(
+                targets,
+                period="10d",
+                interval="1d",
+                auto_adjust=True,
+                group_by="ticker",
+                progress=False,
+                threads=True,
+            )
+        except Exception:
+            # Network / yfinance failures fall through to per-symbol fetch.
+            return
+
+        hits = 0
+        if frame is None or getattr(frame, "empty", True):
+            self._log_batch_metrics(len(targets), 0, started)
+            return
+
+        # Single-ticker response: flat columns. Multi-ticker: MultiIndex.
+        if isinstance(frame.columns, pd.MultiIndex):
+            for symbol in targets:
+                if symbol not in frame.columns.get_level_values(0):
+                    continue
+                try:
+                    sub = frame[symbol]
+                except KeyError:
+                    continue
+                quote = _extract_latest_close(sub, symbol)
+                if quote is not None:
+                    self._quote_cache.set(symbol, quote)
+                    hits += 1
+        else:
+            # Flat columns => single ticker. Only one symbol in targets.
+            if len(targets) == 1:
+                quote = _extract_latest_close(frame, targets[0])
+                if quote is not None:
+                    self._quote_cache.set(targets[0], quote)
+                    hits += 1
+
+        self._log_batch_metrics(len(targets), hits, started)
+
+    def _log_batch_metrics(self, total: int, hits: int, started: float) -> None:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        try:
+            logger.info(
+                "yfinance batch fetch",
+                extra={
+                    "symbols": total,
+                    "elapsed_ms": elapsed_ms,
+                    "hit_rate": round(hits / total, 3) if total else 0.0,
+                },
+            )
+        except Exception:
+            pass
 
     def get_position_valuation(
         self,
@@ -242,6 +357,20 @@ class PortfolioService:
         total_pnl_ars = total_value_ars - total_cost_ars
         total_pnl_usd = total_value_usd - total_cost_usd
 
+        preferred_label = PREFERENCE_TO_COMPARISON_LABEL.get(
+            benchmark_preference.strip().lower(), "inflation"
+        )
+
+        # Concentration buckets — used by the portfolio summary UI to surface
+        # "where am I really invested?". Built off the live valuations so the
+        # weights reflect current market value, not cost basis.
+        sector_exposure = [
+            ExposureBucket(**item) for item in aggregate_exposure(positions, "sector")
+        ]
+        region_exposure = [
+            ExposureBucket(**item) for item in aggregate_exposure(positions, "region")
+        ]
+
         return PortfolioSummary(
             positions_count=len(positions),
             total_value_ars=round(total_value_ars, 2),
@@ -253,7 +382,13 @@ class PortfolioService:
             total_return_pct_ars=round(_safe_return(total_value_ars, total_cost_ars), 4),
             total_return_pct_usd=round(_safe_return(total_value_usd, total_cost_usd), 4),
             total_real_return_pct=round(_aggregate_real_return(positions), 4),
+            total_preferred_benchmark_return_pct=round(
+                _aggregate_preferred_benchmark_return(positions, benchmark_preference), 4
+            ),
+            preferred_benchmark_label=preferred_label,
             positions=positions,
+            sector_exposure=sector_exposure,
+            region_exposure=region_exposure,
         )
 
     def custom_benchmark_comparison(
@@ -504,6 +639,18 @@ class PortfolioService:
         except Exception:
             pass
 
+        # Per-position return vs the user's preferred FX benchmark (MEP/CCL/Oficial).
+        # We resolve the label here so the UI can display "vs MEP +5%" or similar
+        # without recomputing on every render.
+        preferred_label = PREFERENCE_TO_COMPARISON_LABEL.get(
+            benchmark_preference.strip().lower(), "inflation"
+        )
+        preferred_tracked = next(
+            (cmp.tracked_value_ars for cmp in comparisons if cmp.label == preferred_label),
+            inflation_track,
+        )
+        preferred_return = _safe_return(current_value_ars, preferred_tracked)
+
         return PositionValuation(
             position_id=position.position_id,
             instrument_type=position.instrument_type,
@@ -529,6 +676,8 @@ class PortfolioService:
             return_pct_ars=round(_safe_return(current_value_ars, cost_basis_ars), 4),
             return_pct_usd=round(_safe_return(current_value_usd, cost_basis_usd), 4),
             real_return_pct=round(_safe_return(current_value_ars, inflation_track), 4),
+            preferred_benchmark_return_pct=round(preferred_return, 4),
+            preferred_benchmark_label=preferred_label,
             benchmark_comparisons=comparisons,
             notes=notes,
         )
@@ -697,6 +846,42 @@ class PortfolioService:
                 CREATE INDEX IF NOT EXISTS idx_positions_user_id ON positions(user_id);
                 """
             )
+            # Sprint 6.1b: optional FX columns captured at purchase-date from
+            # the Balanz extract. Use ALTER TABLE IF NOT EXISTS pattern so
+            # existing DBs migrate forward without losing data.
+            # SQLite doesn't have ALTER TABLE IF NOT EXISTS — we check pragma.
+            existing_cols = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(positions)").fetchall()
+            }
+            for new_col in ("purchase_ccl", "purchase_mep", "purchase_official"):
+                if new_col not in existing_cols:
+                    conn.execute(f"ALTER TABLE positions ADD COLUMN {new_col} REAL")
+
+
+def _extract_latest_close(frame: pd.DataFrame, symbol: str) -> tuple[float, date] | None:
+    """Pull (close, date) out of a yfinance frame slice.
+
+    Accepts both the per-ticker sub-frame from a multi-ticker download and
+    the flat frame from a single-ticker download. Mirrors the cleaning that
+    ``PortfolioService._latest_close`` does so the cached value has identical
+    shape regardless of which path warmed it.
+    """
+    if frame is None or getattr(frame, "empty", True):
+        return None
+
+    sub = frame.copy()
+    if isinstance(sub.columns, pd.MultiIndex):
+        sub.columns = sub.columns.get_level_values(0)
+    sub.columns = [str(column).title() for column in sub.columns]
+    sub.columns.name = None
+    sub = sub.loc[:, ~pd.Index(sub.columns).duplicated(keep="first")]
+    sub = sub.apply(pd.to_numeric, errors="coerce").dropna()
+    if "Close" not in sub.columns or sub.empty:
+        return None
+    latest_row = sub.iloc[-1]
+    latest_index = sub.index[-1]
+    return (float(latest_row["Close"]), pd.Timestamp(latest_index).date())
 
 
 def _record_from_row(row) -> PositionRecord:
@@ -757,3 +942,58 @@ def _aggregate_real_return(positions: list[PositionValuation]) -> float:
         )
         total_inflation_track += inflation_line.tracked_value_ars
     return _safe_return(total_current, total_inflation_track)
+
+
+# Map the user-facing `benchmark_preference` (the FX they care about) to the
+# label used inside each BenchmarkComparison record. This is the bridge
+# between profile config and the math layer.
+PREFERENCE_TO_COMPARISON_LABEL = {
+    "official": "official_usd",
+    "mep": "mep_usd",
+    "ccl": "ccl_usd",
+}
+
+
+def _aggregate_preferred_benchmark_return(
+    positions: list[PositionValuation],
+    benchmark_preference: str,
+) -> float:
+    """Aggregate "did the portfolio beat the chosen FX benchmark?" across positions.
+
+    Independent from `_aggregate_real_return` (which is canonical vs-inflation).
+    This answers the question every Argentinian retail investor actually has:
+    "Comparado contra el dólar que me importa, ¿gané o perdí?".
+    """
+    if not positions:
+        return 0.0
+    label = PREFERENCE_TO_COMPARISON_LABEL.get(benchmark_preference.strip().lower())
+    if not label:
+        return 0.0
+    total_current = sum(item.current_value_ars for item in positions)
+    total_tracked = 0.0
+    for item in positions:
+        line = next(
+            (cmp for cmp in item.benchmark_comparisons if cmp.label == label),
+            None,
+        )
+        if line is None:
+            continue
+        total_tracked += line.tracked_value_ars
+    return _safe_return(total_current, total_tracked)
+
+
+def _position_preferred_benchmark_return(
+    valuation: PositionValuation,
+    benchmark_preference: str,
+) -> float:
+    """Per-position version of the above. Used when populating each row."""
+    label = PREFERENCE_TO_COMPARISON_LABEL.get(benchmark_preference.strip().lower())
+    if not label:
+        return 0.0
+    line = next(
+        (cmp for cmp in valuation.benchmark_comparisons if cmp.label == label),
+        None,
+    )
+    if line is None:
+        return 0.0
+    return _safe_return(valuation.current_value_ars, line.tracked_value_ars)

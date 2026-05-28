@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Protocol
@@ -9,6 +11,8 @@ import pandas as pd
 from ..config import HORIZON_CONFIG
 from ..contracts import Horizon
 from ..utils import TTLCache
+
+logger = logging.getLogger("market_bot.api")
 
 
 class MarketDataError(RuntimeError):
@@ -101,6 +105,115 @@ class YFinanceMarketDataAdapter:
             frame=frame,
         )
         return self._price_cache.set(cache_key, history)
+
+    def prefetch_universe(self, tickers: list[str], horizon: Horizon) -> None:
+        """Warm ``self._price_cache`` with a single batched yfinance call.
+
+        One ``yf.download`` for the whole universe replaces N sequential
+        per-ticker fetches inside the ranking thread pool. Each surviving
+        ticker is normalised into the same :class:`PriceHistory` shape that
+        ``get_price_history`` produces, so the downstream code path is
+        unchanged.
+
+        Failures (network outage, yfinance hiccup, missing tickers) are
+        silently dropped — ``get_price_history`` will fall back to its own
+        per-symbol fetch for cache misses.
+        """
+        normalized = sorted({t.upper() for t in tickers if t})
+        targets = [
+            t for t in normalized
+            if self._price_cache.get((t, horizon.value)) is None
+        ]
+        if not targets:
+            return
+
+        try:
+            yf = self._load_yfinance()
+        except MarketDataError:
+            return
+
+        config = HORIZON_CONFIG[horizon]
+        started = time.perf_counter()
+        try:
+            frame = yf.download(
+                targets,
+                period=config.period,
+                interval=config.interval,
+                auto_adjust=True,
+                group_by="ticker",
+                progress=False,
+                threads=True,
+            )
+        except Exception:
+            return
+
+        hits = 0
+        if frame is None or getattr(frame, "empty", True):
+            self._log_batch(len(targets), 0, started)
+            return
+
+        required_columns = ["Open", "High", "Low", "Close", "Volume"]
+
+        def _store(symbol: str, sub: pd.DataFrame) -> bool:
+            if sub is None or sub.empty:
+                return False
+            sub = sub.copy()
+            if isinstance(sub.columns, pd.MultiIndex):
+                sub.columns = sub.columns.get_level_values(0)
+            sub = sub.rename(columns={c: str(c).title() for c in sub.columns})
+            sub.columns.name = None
+            sub = sub.loc[:, ~sub.columns.duplicated(keep="first")]
+            missing = [c for c in required_columns if c not in sub.columns]
+            if missing:
+                return False
+            sub = (
+                sub.loc[:, required_columns]
+                .apply(pd.to_numeric, errors="coerce")
+                .dropna()
+                .sort_index()
+            )
+            if len(sub) < config.warmup_bars:
+                return False
+            history = PriceHistory(
+                ticker=symbol,
+                horizon=horizon,
+                interval=config.interval,
+                period=config.period,
+                frame=sub,
+            )
+            self._price_cache.set((symbol, horizon.value), history)
+            return True
+
+        if isinstance(frame.columns, pd.MultiIndex):
+            top_level = set(frame.columns.get_level_values(0))
+            for symbol in targets:
+                if symbol not in top_level:
+                    continue
+                try:
+                    sub = frame[symbol]
+                except KeyError:
+                    continue
+                if _store(symbol, sub):
+                    hits += 1
+        else:
+            if len(targets) == 1 and _store(targets[0], frame):
+                hits += 1
+
+        self._log_batch(len(targets), hits, started)
+
+    def _log_batch(self, total: int, hits: int, started: float) -> None:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        try:
+            logger.info(
+                "yfinance batch fetch",
+                extra={
+                    "symbols": total,
+                    "elapsed_ms": elapsed_ms,
+                    "hit_rate": round(hits / total, 3) if total else 0.0,
+                },
+            )
+        except Exception:
+            pass
 
     def get_instrument_context(self, ticker: str) -> InstrumentContext:
         cache_key = ticker.upper()

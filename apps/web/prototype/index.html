@@ -8,7 +8,7 @@
     <title>Market Bot · Editorial Terminal</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="./styles.css?v=20260528-design3" />
+    <link rel="stylesheet" href="./styles.css?v=20260529-sprint7c" />
     <script>
       // Pre-paint theme resolution to avoid FOUC.
       (function () {
@@ -195,6 +195,7 @@
             <button type="button" class="surface-tab" data-surface="portfolio">Portfolio</button>
             <button type="button" class="surface-tab" data-surface="howto">How to use</button>
             <button type="button" class="surface-tab" data-surface="learning">Learning</button>
+            <button type="button" class="surface-tab" data-surface="chat">Asistente</button>
             <button type="button" class="surface-tab" data-surface="trading">Trading / Wallbit</button>
           </div>
         </section>
@@ -307,6 +308,10 @@
                     <div class="context-stack" id="portfolio-earnings-feed"></div>
                   </div>
                 </div>
+                <div class="earnings-history-shell">
+                  <p class="context-subtitle">Surprise history · últimos 12 quarters</p>
+                  <div id="ticker-earnings-history" class="earnings-history-grid"></div>
+                </div>
               </article>
 
               <article class="analysis-card wide-card">
@@ -353,6 +358,7 @@
               <button type="button" class="portfolio-view-tab is-selected" data-portfolio-view-tab="summary">Resumen</button>
               <button type="button" class="portfolio-view-tab" data-portfolio-view-tab="load">Cargar</button>
               <button type="button" class="portfolio-view-tab" data-portfolio-view-tab="holdings">Posiciones</button>
+              <button type="button" class="portfolio-view-tab" data-portfolio-view-tab="diagnostics">Diagnóstico</button>
             </div>
 
             <div class="empty-state" id="portfolio-locked-state">
@@ -397,6 +403,24 @@
                   </div>
                   <p class="fx-diagnostic-note">El USD del portfolio se calcula dividiendo el valor ARS por el CCL actual. Si el FX implícito (valor ARS ÷ valor USD reportado) se aleja del CCL, hay algún ratio CEDEAR mal cargado.</p>
                 </article>
+                <div class="exposure-row" id="exposure-row">
+                  <article class="exposure-card" id="exposure-card-sector" aria-live="polite">
+                    <div class="exposure-card-head">
+                      <span class="analysis-kicker">Concentración por sector</span>
+                      <span class="exposure-card-hint" id="exposure-sector-hint">—</span>
+                    </div>
+                    <div class="exposure-bar" id="exposure-bar-sector" role="img" aria-label="Distribución del portfolio por sector"></div>
+                    <div class="exposure-legend" id="exposure-legend-sector"></div>
+                  </article>
+                  <article class="exposure-card" id="exposure-card-region" aria-live="polite">
+                    <div class="exposure-card-head">
+                      <span class="analysis-kicker">Concentración por región</span>
+                      <span class="exposure-card-hint" id="exposure-region-hint">—</span>
+                    </div>
+                    <div class="exposure-bar" id="exposure-bar-region" role="img" aria-label="Distribución del portfolio por región"></div>
+                    <div class="exposure-legend" id="exposure-legend-region"></div>
+                  </article>
+                </div>
                 <div class="summary-grid" id="portfolio-summary-grid"></div>
                 <article class="portfolio-subpanel benchmark-panel is-hidden" id="benchmark-panel">
                   <div class="portfolio-subpanel-head">
@@ -534,6 +558,45 @@
                   <p>Todavía no cargaste posiciones. Cuando sumes algo, este tab te va a mostrar los rendimientos por ticker.</p>
                 </div>
                 <div class="holdings-grid" id="holdings-grid"></div>
+              </section>
+
+              <section class="portfolio-view" id="portfolio-view-diagnostics" data-portfolio-view="diagnostics">
+                <div class="portfolio-section-head">
+                  <div>
+                    <p class="analysis-kicker">Diagnóstico</p>
+                    <h3>Precio crudo por posición</h3>
+                  </div>
+                </div>
+                <p class="diagnostics-intro">
+                  Esta vista muestra exactamente qué precio, ratio y FX se usó para valuar cada
+                  posición. Si una fila tiene <strong>FX implícito muy lejos del CCL</strong>,
+                  ese ticker está rompiendo el total del portfolio. Suele pasar cuando yfinance
+                  devuelve un precio stale o equivocado para el <code>.BA</code>.
+                </p>
+                <div class="diagnostics-header" id="diagnostics-header"></div>
+                <div class="diagnostics-actions">
+                  <button type="button" class="ghost-button" id="diagnostics-refresh">Actualizar</button>
+                  <button type="button" class="ghost-button" id="diagnostics-toggle-only-bad">Sólo problemáticas</button>
+                </div>
+                <div class="diagnostics-table-wrap">
+                  <table class="diagnostics-table" id="diagnostics-table">
+                    <thead>
+                      <tr>
+                        <th>Ticker</th>
+                        <th>Tipo</th>
+                        <th>Qty</th>
+                        <th>Ratio · Source</th>
+                        <th>Precio local</th>
+                        <th>Valor ARS</th>
+                        <th>Valor USD</th>
+                        <th>FX implícito</th>
+                        <th>Drift vs CCL</th>
+                      </tr>
+                    </thead>
+                    <tbody id="diagnostics-tbody"></tbody>
+                  </table>
+                </div>
+                <p class="diagnostics-status" id="diagnostics-status">Cargando diagnóstico…</p>
               </section>
             </div>
           </section>
@@ -686,6 +749,46 @@
               <div class="learning-meta" id="learning-meta">Mostrando todos los conceptos.</div>
             </div>
             <div class="learning-grid" id="learning-grid"></div>
+          </section>
+        </div>
+
+        <div class="surface-stack" id="surface-chat" data-surface-id="chat">
+          <section class="panel chat-panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Asistente IA</p>
+                <h2>Conversá sobre tu portfolio, tickers o conceptos</h2>
+              </div>
+              <div class="chat-provider-switch" id="chat-provider-switch"></div>
+            </div>
+
+            <div class="chat-layout">
+              <aside class="chat-threads">
+                <div class="chat-threads-head">
+                  <button type="button" class="ghost-button" id="chat-new-thread">+ Nuevo hilo</button>
+                </div>
+                <ul class="chat-thread-list" id="chat-thread-list"></ul>
+                <div class="chat-usage" id="chat-usage"></div>
+              </aside>
+
+              <div class="chat-conversation">
+                <div class="chat-messages" id="chat-messages"></div>
+                <div class="chat-quick-actions" id="chat-quick-actions"></div>
+                <form class="chat-composer" id="chat-composer">
+                  <textarea
+                    id="chat-input"
+                    placeholder="Preguntale por tu portfolio, un ticker, un concepto..."
+                    rows="2"
+                    autocomplete="off"
+                    spellcheck="false"
+                  ></textarea>
+                  <button type="submit" class="primary-button">
+                    <span class="button-label">Enviar</span>
+                  </button>
+                </form>
+                <p class="chat-disclaimer">Esto no es asesoramiento financiero. El asistente muestra datos y marcos de decisión, no recomendaciones específicas.</p>
+              </div>
+            </div>
           </section>
         </div>
 
@@ -1048,6 +1151,14 @@
          before each deploy. Loaded BEFORE app.js so the constant is available
          when the API_BASE resolution runs. Cached with `no-store` per vercel.json. -->
     <script src="./config.js"></script>
-    <script src="./app.js?v=20260528-design3"></script>
+    <!-- Main app uses `defer` so it doesn't block first paint. Parsing
+         still happens once HTML is ready; perceived FCP improves. -->
+    <script src="./app.js?v=20260529-sprint7c-c" defer></script>
+    <!-- Glossary (~50KB of data) is intentionally NOT preloaded here.
+         app.js injects it on demand when the user opens Learning, or on
+         pointerenter of the Learning tab as a prefetch warmup. -->
+    <!-- Optional: preload to bias the browser cache without executing it.
+         Comment out if you want strictly no-cost first paint. -->
+    <link rel="prefetch" href="./glossary.js?v=20260529-sprint7c-c" as="script" />
   </body>
 </html>

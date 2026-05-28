@@ -1,7 +1,7 @@
 // Build stamp — bumped on every UI design pass. Visible at the bottom of the
 // page AND in the console so we can confirm a fresh build is loaded when the
 // user reports "I don't see changes" (usually a cache issue).
-const MARKET_BOT_UI_BUILD = "2026-05-28 · design-v3 · opportunity-cost";
+const MARKET_BOT_UI_BUILD = "2026-05-29 · sprint-7c · diagnostics+perf+surprise+exposure";
 console.info(`%cMarket Bot UI build: ${MARKET_BOT_UI_BUILD}`, "color:#c6f25c;font-weight:600");
 document.addEventListener("DOMContentLoaded", function () {
   const mark = document.getElementById("build-mark");
@@ -43,567 +43,35 @@ const ANALYSIS_CACHE_TTL_MS = 60_000;
 const RANKINGS_CACHE_TTL_MS = 30_000;
 const analysisBundleCache = new Map();
 const rankingsCache = new Map();
-const GLOSSARY_TERMS = [
-  {
-    id: "rsi",
-    label: "RSI",
-    category: "Indicador",
-    short: "Mide si el precio viene demasiado extendido al alza o a la baja.",
-    detail: "Relative Strength Index. Suele leerse como termómetro de momentum. Arriba de 70 puede sugerir sobrecompra y debajo de 30 sobreventa, pero nunca se usa aislado."
-  },
-  {
-    id: "macd",
-    label: "MACD",
-    category: "Indicador",
-    short: "Compara medias para detectar aceleración o pérdida de momentum.",
-    detail: "Moving Average Convergence Divergence. Sirve para ver cruces de momentum y cambios de tendencia relativa. En este producto se combina con RSI, ADX y estructura."
-  },
-  {
-    id: "adx",
-    label: "ADX",
-    category: "Indicador",
-    short: "Mide fuerza de tendencia, no dirección.",
-    detail: "Average Directional Index. Si sube, la tendencia gana fuerza; si cae, el mercado puede estar lateral. Es útil para saber si una señal direccional merece confianza."
-  },
-  {
-    id: "atr",
-    label: "ATR",
-    category: "Riesgo",
-    short: "Mide volatilidad promedio para stops y tamaño.",
-    detail: "Average True Range. Se usa para estimar cuánto se mueve normalmente un activo y ajustar stop loss, take profit y tamaño de posición."
-  },
-  {
-    id: "cedear",
-    label: "CEDEAR",
-    category: "Instrumento",
-    short: "Permite exponerte localmente a una acción extranjera.",
-    detail: "Es un certificado que cotiza en Argentina y replica una acción o ETF del exterior. Para valuarlo bien importa su precio local, el underlying y la relación CEDEAR/acción."
-  },
-  {
-    id: "mep",
-    label: "MEP",
-    category: "Benchmark ARG",
-    short: "Dólar financiero usado para medir retorno real local.",
-    detail: "El dólar MEP sirve como benchmark argentino porque refleja mejor la cobertura en moneda dura que el oficial. En portfolio se compara contra oficial, MEP, CCL, inflación y plazo fijo."
-  },
-  {
-    id: "ccl",
-    label: "CCL",
-    category: "Benchmark ARG",
-    short: "Dólar financiero de salida al exterior y referencia de paridad.",
-    detail: "El contado con liquidación ayuda a estimar valor relativo de activos dolarizados y también a inferir paridades CEDEAR cuando no hay ratio validado explícitamente."
-  },
-  {
-    id: "stop-loss",
-    label: "Stop Loss",
-    category: "Riesgo",
-    short: "Precio donde la tesis deja de ser válida.",
-    detail: "No es sólo un piso técnico. Debería marcar el punto en el que la premisa operativa cambió y seguir en la posición deja de tener sentido."
-  },
-  {
-    id: "earnings",
-    label: "Earnings",
-    category: "Evento",
-    short: "Reporte de resultados que puede invalidar setups técnicos limpios.",
-    detail: "Los resultados trimestrales suelen introducir gap risk. Incluso un setup técnico fuerte puede degradarse si el evento está demasiado cerca."
-  },
-  {
-    id: "probability-up",
-    label: "P(up)",
-    category: "Probabilístico",
-    short: "Probabilidad estimada de que el próximo tramo sea alcista.",
-    detail: "No es una orden. Es la estimación del motor probabilístico para el siguiente tramo del activo y siempre se acompaña con warnings de calibración."
-  },
-  {
-    id: "long",
-    label: "Long",
-    category: "Posición",
-    short: "Apostar a que el activo sube.",
-    detail: "Ir long significa comprar esperando una suba. Tu riesgo clásico queda en una caída del precio y tu invalidación debería estar definida antes de entrar."
-  },
-  {
-    id: "short",
-    label: "Short",
-    category: "Posición",
-    short: "Apostar a que el activo baja.",
-    detail: "Ir short busca ganar con una caída del precio. Requiere más control de riesgo porque las pérdidas potenciales pueden escalar rápido si el activo sube fuerte."
-  },
-  {
-    id: "call",
-    label: "Call",
-    category: "Opciones",
-    short: "Opción que gana valor si el subyacente sube.",
-    detail: "Una call da derecho a comprar el activo a un strike. Se usa para especular al alza, cubrir un short o armar estrategias como covered call."
-  },
-  {
-    id: "put",
-    label: "Put",
-    category: "Opciones",
-    short: "Opción que gana valor si el subyacente baja.",
-    detail: "Una put da derecho a vender el activo a un strike. Sirve para protección, sesgo bajista o estructuras como cash-secured put."
-  },
-  {
-    id: "covered-call",
-    label: "Covered Call",
-    category: "Opciones",
-    short: "Cobrás prima vendiendo una call sobre acciones que ya tenés.",
-    detail: "Es una estrategia conservadora de income. Limitás parte del upside a cambio de cobrar prima, y funciona mejor en activos laterales o con suba moderada."
-  },
-  {
-    id: "cash-secured-put",
-    label: "Cash-Secured Put",
-    category: "Opciones",
-    short: "Vendés una put con efectivo reservado por si te asignan.",
-    detail: "Se usa para intentar entrar más abajo cobrando prima. Sólo tiene sentido si realmente querés comprar el activo al strike pactado."
-  },
-  {
-    id: "implied-volatility",
-    label: "Implied Volatility",
-    category: "Opciones",
-    short: "Volatilidad que el mercado descuenta en el precio de las opciones.",
-    detail: "La volatilidad implícita afecta muchísimo la prima. Si está muy alta, comprar opciones puede ser caro aunque tengas la dirección correcta."
-  },
-  {
-    id: "open-interest",
-    label: "Open Interest",
-    category: "Opciones",
-    short: "Cantidad de contratos abiertos en un strike o vencimiento.",
-    detail: "El open interest ayuda a medir liquidez y zonas de atención del mercado. No es señal por sí solo, pero suma contexto sobre dónde está mirando el flujo."
-  },
-  {
-    id: "delta",
-    label: "Delta",
-    category: "Opciones",
-    short: "Sensibilidad de una opción ante un cambio del subyacente.",
-    detail: "Delta aproxima cuánto se mueve la prima si el activo sube o baja un punto. También se usa como probabilidad aproximada de terminar in the money, con matices."
-  },
-  {
-    id: "theta",
-    label: "Theta",
-    category: "Opciones",
-    short: "Pérdida de valor temporal de una opción.",
-    detail: "Theta mide cuánto valor pierde una opción por el mero paso del tiempo. Por eso comprar opciones tarde y con poco movimiento puede destruir la operación."
-  },
-  {
-    id: "breakout",
-    label: "Breakout",
-    category: "Técnico",
-    short: "Ruptura al alza de una zona importante.",
-    detail: "Un breakout busca capturar expansión de precio cuando una resistencia cede. Idealmente va acompañado por volumen y contexto de mercado que no lo contradiga."
-  },
-  {
-    id: "breakdown",
-    label: "Breakdown",
-    category: "Técnico",
-    short: "Ruptura a la baja de un soporte o rango.",
-    detail: "Un breakdown señala deterioro de estructura. Cuando aparece con volumen y mercado débil, suele habilitar setups short o de salida defensiva."
-  },
-  {
-    id: "support",
-    label: "Support",
-    category: "Técnico",
-    short: "Zona donde históricamente apareció demanda.",
-    detail: "El soporte no es una línea mágica. Es una zona donde el precio reaccionó antes, y si se pierde con convicción puede transformarse en resistencia."
-  },
-  {
-    id: "resistance",
-    label: "Resistance",
-    category: "Técnico",
-    short: "Zona donde históricamente apareció oferta.",
-    detail: "Una resistencia frena avances o exige más volumen para romperse. Si el precio no logra superarla varias veces, el mercado está diciendo que aún no valida niveles más altos."
-  },
-  {
-    id: "mean-reversion",
-    label: "Mean Reversion",
-    category: "Setup",
-    short: "Buscar retorno hacia una media o equilibrio.",
-    detail: "La reversión a la media intenta explotar excesos de corto plazo. Funciona mejor en mercados laterales o cuando un movimiento se estiró demasiado sin nueva información."
-  },
-  {
-    id: "trend-following",
-    label: "Trend Following",
-    category: "Setup",
-    short: "Seguir una tendencia ya confirmada.",
-    detail: "No intenta adivinar pisos ni techos. Busca sumarse a una dirección ya vigente mientras la estructura, el volumen y el contexto general la sostienen."
-  },
-  {
-    id: "risk-reward",
-    label: "Risk / Reward",
-    category: "Riesgo",
-    short: "Relación entre lo que podés perder y lo que aspirás a ganar.",
-    detail: "Una buena tesis con mal risk/reward puede ser una mala operación. La entrada, el stop y el target tienen que justificar el riesgo que estás tomando."
-  },
-  {
-    id: "drawdown",
-    label: "Drawdown",
-    category: "Riesgo",
-    short: "Caída desde un máximo hasta un mínimo posterior.",
-    detail: "El drawdown mide dolor real de estrategia o portfolio. Dos setups con el mismo retorno final pueden ser muy distintos si uno te obligó a soportar una caída mucho mayor."
-  },
-  {
-    id: "slippage",
-    label: "Slippage",
-    category: "Ejecución",
-    short: "Diferencia entre el precio esperado y el ejecutado.",
-    detail: "En activos ilíquidos o eventos rápidos, el slippage puede destruir una ventaja estadística. Por eso el backtest serio siempre debería modelarlo."
-  },
-  {
-    id: "liquidity",
-    label: "Liquidity",
-    category: "Ejecución",
-    short: "Facilidad para entrar y salir sin mover mucho el precio.",
-    detail: "La liquidez importa tanto como la tesis. Un activo poco líquido te puede dar una buena señal y aun así convertirse en una mala operación por spread y ejecución."
-  },
-  {
-    id: "gap-risk",
-    label: "Gap Risk",
-    category: "Riesgo",
-    short: "Riesgo de que el precio abra muy lejos del cierre previo.",
-    detail: "El gap risk aparece mucho alrededor de earnings, noticias o macro. Es clave porque puede saltarse tu stop y empeorar mucho el resultado esperado."
-  },
-  {
-    id: "market-cap",
-    label: "Market Cap",
-    category: "Fundamental",
-    short: "Valor bursátil total de la compañía.",
-    detail: "La capitalización de mercado te da una escala del tamaño de la empresa. No dice si está barata o cara, pero cambia expectativas de crecimiento, riesgo y liquidez."
-  },
-  {
-    id: "pe-ratio",
-    label: "P/E",
-    category: "Fundamental",
-    short: "Relación entre precio de la acción y ganancias por acción.",
-    detail: "Price-to-Earnings ratio. Se usa para comparar valuación relativa: cuánto paga el mercado por cada unidad de ganancia. En Twitter suele verse como P/E o PE, pero sin crecimiento, márgenes y contexto sectorial puede engañar.",
-    keywords: ["pe", "p/e", "price earnings", "price to earnings", "valuacion"]
-  },
-  {
-    id: "guidance",
-    label: "Guidance",
-    category: "Evento",
-    short: "Proyección futura que hace la propia empresa.",
-    detail: "Muchas veces el mercado reacciona más al guidance que al número del trimestre. Un beat con guía floja puede caer igual."
-  },
-  {
-    id: "beat-miss",
-    label: "Beat / Miss",
-    category: "Evento",
-    short: "Superar o decepcionar expectativas del mercado.",
-    detail: "No alcanza con mirar si ganó más o menos. También importa contra qué expectativa se compara y cómo queda la historia de crecimiento hacia adelante."
-  },
-  {
-    id: "vix",
-    label: "VIX",
-    category: "Macro",
-    short: "Índice de volatilidad implícita del S&P 500.",
-    detail: "Se usa como termómetro de miedo del mercado. Cuando sube demasiado, los setups técnicos suelen requerir más confirmación y menor tamaño."
-  },
-  {
-    id: "beta",
-    label: "Beta",
-    category: "Macro",
-    short: "Sensibilidad de una acción frente al mercado general.",
-    detail: "Una beta alta amplifica movimientos del índice. En un régimen risk-off, un activo con beta alta puede sufrir más aunque su historia individual siga intacta."
-  },
-  {
-    id: "take-profit",
-    label: "Take Profit",
-    category: "Riesgo",
-    short: "Zona donde decidís realizar ganancia parcial o total.",
-    detail: "Definir salida antes de entrar evita convertir una operación buena en una decisión emocional. Puede ser fijo, técnico o dinámico según el setup."
-  },
-  {
-    id: "hedge",
-    label: "Hedge",
-    category: "Riesgo",
-    short: "Cobertura para reducir exposición no deseada.",
-    detail: "Un hedge no busca maximizar retorno sino amortiguar un riesgo puntual. Puede hacerse con puts, con posiciones inversas o con instrumentos macro."
-  },
-  {
-    id: "bull-trap",
-    label: "Bull Trap",
-    category: "Técnico",
-    short: "Falsa ruptura alcista que revierte rápido.",
-    detail: "La bull trap suele dejar compradores atrapados arriba. Aparece cuando un breakout no logra sostenerse y el contexto no convalida el movimiento."
-  },
-  {
-    id: "bear-trap",
-    label: "Bear Trap",
-    category: "Técnico",
-    short: "Falsa ruptura bajista que rebota enseguida.",
-    detail: "La bear trap castiga a quien entra tarde al downside. Puede ser señal de absorción de oferta y gatillo para un rebote fuerte."
-  },
+// GLOSSARY_TERMS moved to a separate lazy-loaded file (glossary.js).
+// We keep a let binding here that the rest of the app reads. The data is
+// injected by glossary.js when the user opens the Learning surface; until
+// then this stays empty and we skip render until ready.
+let GLOSSARY_TERMS = window.MARKET_BOT_GLOSSARY || [];
+let _glossaryLoadPromise = null;
+function ensureGlossaryLoaded() {
+  if (GLOSSARY_TERMS.length) return Promise.resolve(GLOSSARY_TERMS);
+  if (_glossaryLoadPromise) return _glossaryLoadPromise;
+  _glossaryLoadPromise = new Promise((resolve) => {
+    if (window.MARKET_BOT_GLOSSARY && window.MARKET_BOT_GLOSSARY.length) {
+      GLOSSARY_TERMS = window.MARKET_BOT_GLOSSARY;
+      resolve(GLOSSARY_TERMS);
+      return;
+    }
+    const onReady = () => {
+      GLOSSARY_TERMS = window.MARKET_BOT_GLOSSARY || [];
+      resolve(GLOSSARY_TERMS);
+    };
+    window.addEventListener('market-bot:glossary-ready', onReady, { once: true });
+    const s = document.createElement('script');
+    s.src = './glossary.js?v=20260529-sprint7';
+    s.async = true;
+    s.onerror = () => resolve([]);
+    document.head.appendChild(s);
+  });
+  return _glossaryLoadPromise;
+}
 
-  // ─── Acronyms financieros + conceptos trending (2026) ──────────────────────
-  {
-    id: "ath",
-    label: "ATH",
-    category: "Acronym",
-    short: "All-Time High — el precio más alto que jamás registró el activo.",
-    detail: "All-Time High. Cuando un activo rompe ATH, sale a precio descubrimiento: no hay resistencia histórica arriba. Suele ser zona de FOMO compradora y también de toma de ganancias institucional."
-  },
-  {
-    id: "atl",
-    label: "ATL",
-    category: "Acronym",
-    short: "All-Time Low — el precio más bajo registrado.",
-    detail: "All-Time Low. Inverso del ATH. Romper ATL suele ser señal técnica destructiva — todos los que compraron arriba están perdiendo y la presión vendedora aumenta. Cuidado con cuchillos cayendo."
-  },
-  {
-    id: "cagr",
-    label: "CAGR",
-    category: "Acronym",
-    short: "Tasa de crecimiento anual compuesta de una inversión.",
-    detail: "Compound Annual Growth Rate. Es el rendimiento anualizado equivalente que tendría una inversión si creciera de manera uniforme. Útil para comparar instrumentos con horizontes distintos. Fórmula: (Vf/Vi)^(1/años) − 1."
-  },
-  {
-    id: "ytd",
-    label: "YTD",
-    category: "Acronym",
-    short: "Year-To-Date — desde el 1 de enero hasta hoy.",
-    detail: "Year-To-Date. Mide el retorno acumulado en lo que va del año calendario. Es la referencia más usada para comparar performance contra índices (S&P 500 YTD, Merval YTD)."
-  },
-  {
-    id: "mtd",
-    label: "MTD",
-    category: "Acronym",
-    short: "Month-To-Date — desde el inicio del mes en curso.",
-    detail: "Month-To-Date. Útil para evaluar performance reciente sin el ruido del año entero. Junto con YTD da una lectura rápida de cómo viene la cosa."
-  },
-  {
-    id: "qtd",
-    label: "QTD",
-    category: "Acronym",
-    short: "Quarter-To-Date — desde el inicio del trimestre.",
-    detail: "Quarter-To-Date. Especialmente relevante porque las empresas reportan trimestrales (Q1, Q2, Q3, Q4) y los hedge funds rebalancean al cierre de cada Q."
-  },
-  {
-    id: "fy",
-    label: "FY26 / FY27",
-    category: "Acronym",
-    short: "Fiscal Year — año fiscal de la empresa, no necesariamente calendario.",
-    detail: "Fiscal Year. Apple usa FY que termina en septiembre; Microsoft en junio. Cuando un analista dice 'FY27 EPS', se refiere al año fiscal proyectado, no al calendario. Importante para no confundir guidance."
-  },
-  {
-    id: "q1-q4",
-    label: "1Q26 / Q1 2026",
-    category: "Acronym",
-    short: "Cuarto trimestre fiscal. 1Q26 = primer trimestre del FY 2026.",
-    detail: "Notación de earnings calls. 1Q26 = Q1 del fiscal year 2026 de la empresa. Cada trimestre tiene un earnings release: revenue, EPS, guidance forward. El movimiento post-earnings suele ser el catalyst más grande del año."
-  },
-  {
-    id: "eps",
-    label: "EPS",
-    category: "Acronym",
-    short: "Earnings Per Share — ganancia neta dividida acciones en circulación.",
-    detail: "Earnings Per Share. EPS reportado vs EPS consensus es el dato clave en cada earnings call. Beat = reportado supera estimado. Miss = quedó debajo. La reacción del precio depende más del guidance forward que del EPS pasado."
-  },
-  {
-    id: "pe-ratio",
-    label: "P/E",
-    category: "Acronym",
-    short: "Price-to-Earnings — múltiplo de valuación clásico.",
-    detail: "Price-to-Earnings ratio. Cuántos dólares pagás por cada dólar de ganancia anual. P/E alto = mercado paga premium por crecimiento (NVDA, TSLA). P/E bajo = value (XOM, F). Compará siempre contra peers de la misma industria."
-  },
-  {
-    id: "peg",
-    label: "PEG",
-    category: "Acronym",
-    short: "P/E ajustado por crecimiento esperado.",
-    detail: "Price/Earnings to Growth. PEG = P/E / tasa de crecimiento %. Idea de Peter Lynch: si PEG < 1, la acción está barata relativa a su crecimiento. Más útil para growth stocks que P/E solo."
-  },
-  {
-    id: "ev-ebitda",
-    label: "EV/EBITDA",
-    category: "Acronym",
-    short: "Múltiplo de valor empresa sobre ganancia operativa.",
-    detail: "Enterprise Value / EBITDA. Más limpio que P/E porque elimina el efecto de deuda y impuestos. Estándar para M&A y para comparar empresas con estructuras de capital distintas."
-  },
-  {
-    id: "fcf",
-    label: "FCF",
-    category: "Acronym",
-    short: "Free Cash Flow — caja libre que genera el negocio.",
-    detail: "Free Cash Flow = operating cash flow − capex. Es la métrica preferida de inversores serios (Buffett-style) porque es plata real, no contable. FCF yield = FCF / market cap.",
-    keywords: ["free cash flow", "fcf yield", "cash flow libre", "caja libre"]
-  },
-  {
-    id: "ltm",
-    label: "LTM",
-    category: "Acronym",
-    short: "Last Twelve Months — los últimos 12 meses móviles.",
-    detail: "LTM se usa para mirar revenue, EBITDA, EPS o FCF sin depender del cierre exacto del año fiscal. Cuando ves EV/LTM EBITDA o P/LTM EPS, están annualizando con la ventana más reciente.",
-    keywords: ["last twelve months", "ttm", "trailing twelve months", "ultimos 12 meses"]
-  },
-  {
-    id: "roic",
-    label: "ROIC",
-    category: "Acronym",
-    short: "Return on Invested Capital — retorno sobre el capital invertido.",
-    detail: "ROIC mide cuánta ganancia operativa genera la empresa por cada dólar realmente invertido en el negocio. Suele usarse para detectar negocios de calidad: ROIC alto y sostenible suele apuntar a ventaja competitiva real.",
-    keywords: ["return on invested capital", "retorno sobre capital invertido", "quality compounder"]
-  },
-  {
-    id: "tam",
-    label: "TAM",
-    category: "Acronym",
-    short: "Total Addressable Market — tamaño máximo del mercado.",
-    detail: "Total Addressable Market. Cuánta plata podría generar la empresa si capturara el 100% del mercado. TAM grande + bajo penetration % = thesis típica de growth/AI."
-  },
-  {
-    id: "arr",
-    label: "ARR / MRR",
-    category: "Acronym",
-    short: "Annual / Monthly Recurring Revenue de un SaaS.",
-    detail: "ARR = Annual Recurring Revenue. MRR = Monthly. Métricas clave para SaaS (Salesforce, Snowflake, CrowdStrike). Crecimiento de ARR > 30% YoY se considera alto. Net Revenue Retention (NRR) > 120% es excelente."
-  },
-  {
-    id: "yoy",
-    label: "YoY / QoQ",
-    category: "Acronym",
-    short: "Year-over-Year / Quarter-over-Quarter — comparación temporal.",
-    detail: "YoY (Year over Year) compara el mismo trimestre vs el anterior año. QoQ (Quarter over Quarter) compara consecutivos. YoY es más confiable porque limpia estacionalidad. Headline siempre se reporta YoY."
-  },
-  {
-    id: "guidance",
-    label: "Guidance",
-    category: "Concepto",
-    short: "Proyección de resultados que la empresa publica.",
-    detail: "Guidance es el outlook que da la empresa para el próximo trimestre o año fiscal. Un raise = sube la guía vs anterior. Cut = la baja. El precio reacciona MÁS al guidance que al beat/miss del trimestre reportado."
-  },
-  {
-    id: "consensus",
-    label: "Consensus",
-    category: "Concepto",
-    short: "Promedio de estimaciones de analistas para earnings/revenue.",
-    detail: "Consensus estimate = el número que el mercado ya espera. Beat/miss se mide contra esto, no contra el año pasado. Whisper number = el número 'real' que se rumorea entre traders, suele ser más exigente que el consensus público."
-  },
-  {
-    id: "buyback",
-    label: "Buyback",
-    category: "Concepto",
-    short: "La empresa compra sus propias acciones en mercado.",
-    detail: "Stock buyback / share repurchase. Reduce el número de acciones en circulación → sube EPS automáticamente. Apple, Meta y Google son los reyes del buyback. Suele ser señal de management confiando en su valuación."
-  },
-  {
-    id: "dividend-yield",
-    label: "Dividend Yield",
-    category: "Concepto",
-    short: "Dividendo anual dividido el precio actual.",
-    detail: "Yield = dividend per share / price. Las empresas maduras pagan dividendos (KO, JPM, XOM). En Argentina, los CEDEARs también pagan, pero hay que considerar el FX y la retención del 10%."
-  },
-  {
-    id: "moat",
-    label: "Moat",
-    category: "Concepto",
-    short: "Ventaja competitiva sostenible que protege márgenes.",
-    detail: "Economic moat. Término popularizado por Buffett. Tipos: network effect (Meta), switching costs (Microsoft), brand (Coca-Cola), low-cost (Costco), intangible assets (patentes). Sin moat, los márgenes se erosionan."
-  },
-  {
-    id: "drawdown",
-    label: "Drawdown",
-    category: "Riesgo",
-    short: "Caída desde el último máximo hasta el mínimo subsecuente.",
-    detail: "Max Drawdown = peor caída pico-a-valle que sufrió una inversión. Para evaluar estrategias importa más que el retorno total: una estrategia con +40% retorno pero −60% drawdown probablemente no la tolerás. Calmar ratio = retorno / |max DD|."
-  },
-  {
-    id: "sharpe",
-    label: "Sharpe Ratio",
-    category: "Riesgo",
-    short: "Retorno ajustado por riesgo (volatilidad).",
-    detail: "Sharpe = (retorno − tasa libre de riesgo) / desviación estándar. Sharpe > 1 = bueno. > 2 = excelente. > 3 = sospechoso. Mide eficiencia: dos estrategias con mismo retorno pero distinta volatilidad tienen Sharpe distinto."
-  },
-  {
-    id: "beta",
-    label: "Beta",
-    category: "Riesgo",
-    short: "Sensibilidad de un activo al movimiento del mercado.",
-    detail: "Beta = covarianza(activo, mercado) / varianza(mercado). β = 1 → se mueve con el S&P. β > 1 → más volátil (NVDA ~1.7). β < 1 → más defensivo (KO ~0.6). β negativa es rara (oro a veces). No confundir con alpha."
-  },
-  {
-    id: "vix",
-    label: "VIX",
-    category: "Riesgo",
-    short: "Índice de volatilidad esperada del S&P 500.",
-    detail: "VIX = 'fear index'. Mide volatilidad implícita de opciones del SPX a 30 días. VIX < 15 = mercado tranquilo. > 25 = stress. > 40 = pánico (COVID, 2008). VIX cae cuando el mercado sube, por eso es contrarian."
-  },
-  {
-    id: "fomc",
-    label: "FOMC",
-    category: "Evento",
-    short: "Reunión de la Fed donde se decide la tasa de interés.",
-    detail: "Federal Open Market Committee. Se reúne ~8 veces al año. La decisión y el statement de Powell mueven todo: bonos, acciones, dólar, oro, cripto. Dot plot = proyección de tasas. Hawkish = sube tasas / restrictivo. Dovish = baja / acomodaticio."
-  },
-  {
-    id: "cpi-ppi",
-    label: "CPI / PPI",
-    category: "Evento",
-    short: "Inflación al consumidor / al productor — datos macro clave.",
-    detail: "CPI (Consumer Price Index) sale mensualmente en USA. PPI (Producer Price Index) anticipa. Core CPI excluye comida y energía (más volátiles). Datos por arriba de expectativas → la Fed sube tasas → S&P baja. Es el calendario macro #1."
-  },
-  {
-    id: "nfp",
-    label: "NFP",
-    category: "Evento",
-    short: "Non-Farm Payrolls — empleo no agrícola de USA.",
-    detail: "Sale el primer viernes de cada mes a las 8:30 ET. Mide jobs creados, unemployment rate y wage growth. Strong NFP → Fed hawkish → bonos caen. Weak NFP → posible recesión → flight to safety."
-  },
-  {
-    id: "ai-bubble",
-    label: "AI Capex",
-    category: "Trending",
-    short: "Inversión masiva en infraestructura de IA por hyperscalers.",
-    detail: "Microsoft, Meta, Google, Amazon están gastando $200B+ por año en GPUs (NVDA), data centers y energía nuclear (SMR). Trade asociado: AVGO, ANET, VRT, CEG, NRG, ASML. Pregunta abierta: cuándo se monetiza ese capex."
-  },
-  {
-    id: "magnificent-seven",
-    label: "Mag 7",
-    category: "Trending",
-    short: "Las 7 mega-caps tech que mueven el S&P 500.",
-    detail: "Magnificent Seven: AAPL, MSFT, GOOGL, AMZN, META, NVDA, TSLA. Pesan ~30% del S&P 500. Si bajan, baja todo el índice. Concentración récord — nunca antes 7 compañías representaron tanto del mercado."
-  },
-  {
-    id: "etf-flows",
-    label: "ETF Flows",
-    category: "Trending",
-    short: "Entradas/salidas netas de capital en ETFs.",
-    detail: "ETF inflows = compradores netos pagando primas para entrar al fondo. Outflows = redenciones. SPY, QQQ, IBIT (Bitcoin), GLD son los más seguidos. Flows fuertes confirman tendencia o anticipan capitulación."
-  },
-  {
-    id: "dxy",
-    label: "DXY",
-    category: "Trending",
-    short: "Índice del dólar estadounidense vs canasta de monedas.",
-    detail: "Dollar Index. DXY mide USD vs EUR, JPY, GBP, CAD, SEK, CHF. DXY sube → equity emergente (Argentina, Brasil) sufre, oro cae, cripto en general también. DXY < 100 = USD débil. > 105 = fuerte."
-  },
-  {
-    id: "yield-curve",
-    label: "Yield Curve",
-    category: "Trending",
-    short: "Curva de tasas del Tesoro USA por plazo.",
-    detail: "Compara 2Y, 10Y, 30Y treasury yields. Inverted yield curve (2Y > 10Y) predijo todas las recesiones desde 1955. Steepening = mercado descuenta crecimiento. Flattening = desaceleración inminente. Hoy el 10Y rinde ~4.2%."
-  },
-  {
-    id: "carry-trade",
-    label: "Carry Trade",
-    category: "Trending",
-    short: "Pedís prestado barato en una moneda, invertís en otra de tasa alta.",
-    detail: "Clásico: pedís yenes al 0.5%, invertís en pesos al 100%. Funciona si el FX se mantiene. Cuando el yen se aprecia rápido (2024 BoJ hike), el unwind del carry tira abajo todos los activos en simultáneo. Riesgo de tail."
-  },
-  {
-    id: "dollar-cost-averaging",
-    label: "DCA",
-    category: "Concepto",
-    short: "Dollar-Cost Averaging — comprar en cuotas regulares.",
-    detail: "Invertir un monto fijo cada cierto intervalo (semanal/mensual) sin importar el precio. Reduce el riesgo de timing pero también el upside. Es la estrategia recomendada por defecto para inversores no profesionales."
-  },
-  {
-    id: "rebalance",
-    label: "Rebalance",
-    category: "Concepto",
-    short: "Re-ajustar pesos del portfolio a la asignación target.",
-    detail: "Si planificaste 60% acciones / 40% bonos pero las acciones subieron y ahora son 70/30, rebalanceás vendiendo acciones y comprando bonos. Sistemático, no emocional. Frecuencia típica: trimestral o anual."
-  }
-];
 
 const state = {
   ticker: "AAPL",
@@ -627,7 +95,19 @@ const state = {
   hasAnalyzed: false,
   analysisRequestId: 0,
   rankingMode: window.localStorage.getItem("marketBotRankingMode") || "default",
-  currentFx: null
+  currentFx: null,
+  // ----- Asistente / Chat -----
+  chatInitialized: false,
+  chatLoading: false,
+  chatSending: false,
+  chatProviders: [],
+  chatCurrentProvider: null,
+  chatThreads: [],
+  chatCurrentThreadId: window.localStorage.getItem("marketBotChatThreadId") || null,
+  chatMessages: [],
+  chatUsage: null,
+  chatRequestId: 0,
+  chatError: null
 };
 
 let isApplyingRoute = false;
@@ -669,6 +149,7 @@ const elements = {
   earningsTitle: document.querySelector("#earnings-title"),
   earningsChip: document.querySelector("#earnings-chip"),
   tickerEarningsFeed: document.querySelector("#ticker-earnings-feed"),
+  tickerEarningsHistory: document.querySelector("#ticker-earnings-history"),
   portfolioEarningsFeed: document.querySelector("#portfolio-earnings-feed"),
   workspaceTitle: document.querySelector("#workspace-title"),
   marketChip: document.querySelector("#market-chip"),
@@ -686,6 +167,7 @@ const elements = {
   portfolioSurface: document.querySelector("#surface-portfolio"),
   howtoSurface: document.querySelector("#surface-howto"),
   learningSurface: document.querySelector("#surface-learning"),
+  chatSurface: document.querySelector("#surface-chat"),
   tradingSurface: document.querySelector("#surface-trading"),
   accessSurface: document.querySelector("#surface-access"),
   accessPanel: document.querySelector(".access-panel"),
@@ -720,6 +202,12 @@ const elements = {
   portfolioViewSummary: document.querySelector("#portfolio-view-summary"),
   portfolioViewLoad: document.querySelector("#portfolio-view-load"),
   portfolioViewHoldings: document.querySelector("#portfolio-view-holdings"),
+  portfolioViewDiagnostics: document.querySelector("#portfolio-view-diagnostics"),
+  diagnosticsHeader: document.querySelector("#diagnostics-header"),
+  diagnosticsTbody: document.querySelector("#diagnostics-tbody"),
+  diagnosticsStatus: document.querySelector("#diagnostics-status"),
+  diagnosticsRefresh: document.querySelector("#diagnostics-refresh"),
+  diagnosticsToggleOnlyBad: document.querySelector("#diagnostics-toggle-only-bad"),
   portfolioEmptySummary: document.querySelector("#portfolio-empty-summary"),
   portfolioEmptyHoldings: document.querySelector("#portfolio-empty-holdings"),
   portfolioImportForm: document.querySelector("#portfolio-import-form"),
@@ -755,6 +243,13 @@ const elements = {
   fxDiagnosticImplied: document.querySelector("#fx-diagnostic-implied"),
   benchmarkPanel: document.querySelector("#benchmark-panel"),
   benchmarkBars: document.querySelector("#benchmark-bars"),
+  exposureRow: document.querySelector("#exposure-row"),
+  exposureBarSector: document.querySelector("#exposure-bar-sector"),
+  exposureLegendSector: document.querySelector("#exposure-legend-sector"),
+  exposureHintSector: document.querySelector("#exposure-sector-hint"),
+  exposureBarRegion: document.querySelector("#exposure-bar-region"),
+  exposureLegendRegion: document.querySelector("#exposure-legend-region"),
+  exposureHintRegion: document.querySelector("#exposure-region-hint"),
   closeAccountButton: document.querySelector("#close-account-button")
 };
 
@@ -925,7 +420,7 @@ function accessFocusTarget() {
   return state.authMode === "register" ? elements.authDisplayName : elements.authUsername;
 }
 
-const SURFACE_ORDER = ["workspace", "portfolio", "howto", "learning", "trading", "access"];
+const SURFACE_ORDER = ["workspace", "portfolio", "howto", "learning", "chat", "trading", "access"];
 
 function normalizedHashRoute(hash) {
   const route = String(hash || "")
@@ -1016,6 +511,7 @@ function setSurface(surface, options = {}) {
     portfolio: elements.portfolioSurface,
     howto: elements.howtoSurface,
     learning: elements.learningSurface,
+    chat: elements.chatSurface,
     trading: elements.tradingSurface,
     access: elements.accessSurface
   };
@@ -1057,6 +553,9 @@ function setSurface(surface, options = {}) {
   if (activeBaseSurface === "learning") {
     ensureLearningReady();
   }
+  if (activeBaseSurface === "chat") {
+    initializeChat();
+  }
   if (surface === "access") {
     window.requestAnimationFrame(() => {
       const focusTarget = accessFocusTarget();
@@ -1075,7 +574,8 @@ function setPortfolioView(view) {
   const views = {
     summary: elements.portfolioViewSummary,
     load: elements.portfolioViewLoad,
-    holdings: elements.portfolioViewHoldings
+    holdings: elements.portfolioViewHoldings,
+    diagnostics: elements.portfolioViewDiagnostics
   };
 
   Object.entries(views).forEach(([key, node]) => {
@@ -1087,6 +587,692 @@ function setPortfolioView(view) {
     button.classList.toggle("is-selected", isSelected);
     button.setAttribute("aria-selected", isSelected ? "true" : "false");
   });
+
+  if (view === "diagnostics") {
+    loadDiagnostics();
+  }
+}
+
+// Diagnostics view — surface raw per-position values to debug "the numbers
+// don't add up" reports from the user. Sorted by |fx_drift| descending so
+// the worst offenders appear first; one click and we know which yfinance
+// fetch is broken.
+let _diagnosticsOnlyBad = false;
+let _diagnosticsCache = null;
+
+async function loadDiagnostics() {
+  if (!state.accessToken) {
+    if (elements.diagnosticsStatus) {
+      elements.diagnosticsStatus.textContent = "Ingresá para ver el diagnóstico de tu portfolio.";
+    }
+    if (elements.diagnosticsTbody) elements.diagnosticsTbody.innerHTML = "";
+    if (elements.diagnosticsHeader) elements.diagnosticsHeader.innerHTML = "";
+    return;
+  }
+  if (elements.diagnosticsStatus) {
+    elements.diagnosticsStatus.textContent = "Pidiendo precios crudos al backend…";
+  }
+  try {
+    const data = await fetchJson("/portfolio/diagnostics", { auth: true });
+    _diagnosticsCache = data;
+    renderDiagnostics(data);
+  } catch (error) {
+    if (elements.diagnosticsStatus) {
+      elements.diagnosticsStatus.textContent = `No se pudo cargar el diagnóstico: ${error.message}`;
+    }
+  }
+}
+
+function renderDiagnostics(data) {
+  if (!data || !Array.isArray(data.positions)) return;
+
+  // Sort by absolute drift descending — worst rows surface first.
+  const sorted = [...data.positions].sort(
+    (a, b) => Math.abs(Number(b.fx_drift_pct) || 0) - Math.abs(Number(a.fx_drift_pct) || 0)
+  );
+  const filtered = _diagnosticsOnlyBad
+    ? sorted.filter((p) => Math.abs(Number(p.fx_drift_pct) || 0) > 25)
+    : sorted;
+
+  const totalBad = sorted.filter((p) => Math.abs(Number(p.fx_drift_pct) || 0) > 25).length;
+  const totalWarning = sorted.filter((p) => {
+    const drift = Math.abs(Number(p.fx_drift_pct) || 0);
+    return drift > 10 && drift <= 25;
+  }).length;
+  const totalOk = sorted.length - totalBad - totalWarning;
+
+  if (elements.diagnosticsHeader) {
+    elements.diagnosticsHeader.innerHTML = `
+      <div class="diagnostics-stat">
+        <span class="metric-label">Snapshot</span>
+        <strong>${escapeText(data.as_of)}</strong>
+      </div>
+      <div class="diagnostics-stat">
+        <span class="metric-label">CCL actual</span>
+        <strong>${formatMoney(data.current_ccl, "ARS")}</strong>
+      </div>
+      <div class="diagnostics-stat">
+        <span class="metric-label">MEP actual</span>
+        <strong>${formatMoney(data.current_mep, "ARS")}</strong>
+      </div>
+      <div class="diagnostics-stat">
+        <span class="metric-label">Oficial</span>
+        <strong>${formatMoney(data.current_official, "ARS")}</strong>
+      </div>
+      <div class="diagnostics-stat tone-${totalBad > 0 ? "bear" : totalWarning > 0 ? "neutral" : "bull"}">
+        <span class="metric-label">Salud</span>
+        <strong>${totalOk} ✓ · ${totalWarning} ⚠ · ${totalBad} ✗</strong>
+      </div>
+    `;
+  }
+
+  if (elements.diagnosticsTbody) {
+    elements.diagnosticsTbody.innerHTML = filtered
+      .map((p) => {
+        const drift = Number(p.fx_drift_pct) || 0;
+        const absDrift = Math.abs(drift);
+        const tone = absDrift > 25 ? "bear" : absDrift > 10 ? "neutral" : "bull";
+        const ratioSourceLabel = {
+          user_supplied: "Manual",
+          canonical: "BYMA",
+          estimated_market_parity: "Paridad",
+          fallback_default: "⚠ Fallback"
+        }[p.ratio_source] || "—";
+
+        return `
+          <tr class="diagnostics-row tone-${tone}">
+            <td><strong>${escapeText(p.symbol)}</strong></td>
+            <td><span class="diagnostics-chip">${escapeText(p.instrument_type)}</span></td>
+            <td class="diagnostics-num">${(Number(p.quantity) || 0).toLocaleString("es-AR")}</td>
+            <td>
+              ${p.cedear_ratio ? `<strong>${p.cedear_ratio}:1</strong>` : "—"}
+              <span class="diagnostics-ratio-source">${escapeText(ratioSourceLabel)}</span>
+            </td>
+            <td class="diagnostics-num">${formatMoney(p.current_price, p.current_price_currency || "ARS")}</td>
+            <td class="diagnostics-num">${formatMoney(p.current_value_ars, "ARS", { magnitude: true })}</td>
+            <td class="diagnostics-num">${formatMoney(p.current_value_usd, "USD")}</td>
+            <td class="diagnostics-num">${(Number(p.implied_fx) || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</td>
+            <td class="diagnostics-num">
+              <span class="diagnostics-drift tone-${tone}">${drift >= 0 ? "+" : ""}${drift.toFixed(1)}%</span>
+            </td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+
+  if (elements.diagnosticsStatus) {
+    if (totalBad > 0) {
+      elements.diagnosticsStatus.innerHTML = `<strong>${totalBad} posiciones</strong> tienen FX implícito que se aleja del CCL en más de 25%. Probablemente yfinance está devolviendo un precio stale para esos <code>.BA</code>. Esas filas están manchando el total del portfolio.`;
+    } else if (totalWarning > 0) {
+      elements.diagnosticsStatus.innerHTML = `${totalWarning} posiciones con drift moderado (10-25%). Aceptable pero conviene revisar.`;
+    } else {
+      elements.diagnosticsStatus.innerHTML = `Todas las posiciones cuadran con el CCL actual. Si el total te sigue chirriando, el problema está en el cost basis o en una posición específica.`;
+    }
+  }
+}
+
+// ============================================================
+// ----- Asistente / Chat module -------------------------------
+// ============================================================
+// Lightweight chat surface backed by /chat/* endpoints. Handles
+// provider selection, thread list, message rendering with inline
+// markdown (bold, code, code fence, bullets, links), quick-action
+// pills, optimistic user-message rendering, and a shimmer state
+// on the assistant bubble while waiting for the response.
+//
+// Streaming (typed-out effect) is out of scope for v1: we just
+// paint the full assistant message when the POST resolves.
+
+const CHAT_QUICK_ACTIONS = [
+  "Analizame mi portfolio",
+  "¿Cómo viene NVDA?",
+  "Explicame qué es CAGR",
+  "Mostrame mi exposición sectorial"
+];
+
+const CHAT_THREAD_KEY = "marketBotChatThreadId";
+
+function chatEl(id) {
+  return document.getElementById(id);
+}
+
+async function initializeChat() {
+  if (state.chatInitialized || state.chatLoading) {
+    // Already running or done — but keep gating fresh if auth state changed.
+    renderChatGateOrPanel();
+    return;
+  }
+  if (!state.accessToken || !state.profile) {
+    renderChatGateOrPanel();
+    bindChatEventsOnce();
+    return;
+  }
+  state.chatLoading = true;
+  renderChatGateOrPanel();
+  renderChatQuickActions();
+  bindChatEventsOnce();
+  try {
+    const [providers, threads, usage] = await Promise.all([
+      fetchJson("/chat/providers", { auth: true }).catch(() => []),
+      fetchJson("/chat/threads", { auth: true }).catch(() => []),
+      fetchJson("/chat/usage", { auth: true }).catch(() => null)
+    ]);
+    state.chatProviders = Array.isArray(providers) ? providers : [];
+    state.chatThreads = Array.isArray(threads) ? threads : [];
+    state.chatUsage = usage || null;
+
+    // Default provider: first configured, else first available.
+    const configured = state.chatProviders.find((p) => p.configured);
+    state.chatCurrentProvider = configured ? configured.id : (state.chatProviders[0] ? state.chatProviders[0].id : null);
+
+    // Restore selected thread from localStorage if it still exists.
+    const persistedId = state.chatCurrentThreadId;
+    const persistedExists = persistedId && state.chatThreads.some((t) => String(t.id) === String(persistedId));
+    if (persistedExists) {
+      state.chatCurrentThreadId = persistedId;
+    } else if (state.chatThreads.length > 0) {
+      state.chatCurrentThreadId = state.chatThreads[0].id;
+      window.localStorage.setItem(CHAT_THREAD_KEY, String(state.chatCurrentThreadId));
+    } else {
+      state.chatCurrentThreadId = null;
+      window.localStorage.removeItem(CHAT_THREAD_KEY);
+    }
+
+    if (state.chatCurrentThreadId) {
+      await loadChatMessages(state.chatCurrentThreadId);
+    } else {
+      state.chatMessages = [];
+    }
+    state.chatInitialized = true;
+  } catch (error) {
+    state.chatError = error.message || String(error);
+  } finally {
+    state.chatLoading = false;
+    renderChatGateOrPanel();
+  }
+}
+
+async function loadChatMessages(threadId) {
+  if (!threadId) {
+    state.chatMessages = [];
+    return;
+  }
+  try {
+    const messages = await fetchJson(`/chat/threads/${encodeURIComponent(threadId)}/messages`, { auth: true });
+    state.chatMessages = Array.isArray(messages) ? messages : [];
+  } catch (error) {
+    state.chatMessages = [];
+    state.chatError = error.message || String(error);
+  }
+}
+
+function renderChatGateOrPanel() {
+  const layout = document.querySelector("#surface-chat .chat-layout");
+  if (!layout) return;
+  const gated = !(state.accessToken && state.profile);
+  if (gated) {
+    layout.innerHTML = `
+      <div class="chat-gate" style="grid-column: 1 / -1;">
+        <strong>Para usar el asistente necesitás una sesión activa.</strong>
+        <p>Ingresá desde la cuenta y vas a poder conversar sobre tu portfolio, tickers y conceptos.</p>
+      </div>
+    `;
+    return;
+  }
+  // Restore panel structure if it was replaced by the gate.
+  if (!chatEl("chat-messages")) {
+    layout.innerHTML = `
+      <aside class="chat-threads">
+        <div class="chat-threads-head">
+          <button type="button" class="ghost-button" id="chat-new-thread">+ Nuevo hilo</button>
+        </div>
+        <ul class="chat-thread-list" id="chat-thread-list"></ul>
+        <div class="chat-usage" id="chat-usage"></div>
+      </aside>
+      <div class="chat-conversation">
+        <div class="chat-messages" id="chat-messages"></div>
+        <div class="chat-quick-actions" id="chat-quick-actions"></div>
+        <form class="chat-composer" id="chat-composer">
+          <textarea
+            id="chat-input"
+            placeholder="Preguntale por tu portfolio, un ticker, un concepto..."
+            rows="2"
+            autocomplete="off"
+            spellcheck="false"
+          ></textarea>
+          <button type="submit" class="primary-button">
+            <span class="button-label">Enviar</span>
+          </button>
+        </form>
+        <p class="chat-disclaimer">Esto no es asesoramiento financiero. El asistente muestra datos y marcos de decisión, no recomendaciones específicas.</p>
+      </div>
+    `;
+    bindChatPanelEvents();
+  }
+  renderChatProviders();
+  renderChatThreads();
+  renderChatMessages();
+  renderChatUsage();
+  renderChatQuickActions();
+}
+
+function renderChatProviders() {
+  const switcher = chatEl("chat-provider-switch");
+  if (!switcher) return;
+  const providers = state.chatProviders || [];
+  const configured = providers.filter((p) => p.configured);
+  if (configured.length === 0) {
+    switcher.innerHTML = `<span class="chat-provider-note">Sin proveedores configurados — agregá una API key en <code>.env</code></span>`;
+    return;
+  }
+  if (configured.length === 1) {
+    // Hide selector when there's nothing to switch.
+    switcher.innerHTML = "";
+    return;
+  }
+  switcher.innerHTML = configured
+    .map((p) => {
+      const selected = p.id === state.chatCurrentProvider;
+      return `<button type="button" class="ranking-mode-pill${selected ? " is-selected" : ""}" data-chat-provider="${escapeAttribute(p.id)}">${escapeText(p.label || p.id)}</button>`;
+    })
+    .join("");
+  switcher.querySelectorAll("[data-chat-provider]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.chatCurrentProvider = btn.dataset.chatProvider;
+      renderChatProviders();
+    });
+  });
+}
+
+function renderChatThreads() {
+  const list = chatEl("chat-thread-list");
+  if (!list) return;
+  const threads = state.chatThreads || [];
+  if (threads.length === 0) {
+    list.innerHTML = `
+      <li class="chat-threads-empty">
+        <span>Todavía no tenés hilos.</span>
+        <button type="button" class="ghost-button" id="chat-empty-create">Crear primer hilo</button>
+      </li>
+    `;
+    const cta = chatEl("chat-empty-create");
+    if (cta) cta.addEventListener("click", () => createChatThread());
+    return;
+  }
+  list.innerHTML = threads
+    .map((t) => {
+      const isActive = String(t.id) === String(state.chatCurrentThreadId);
+      const dateLabel = formatChatDate(t.updated_at || t.created_at);
+      const providerLabel = providerLabelFor(t.provider) || t.provider || "";
+      const title = t.title || "Hilo sin título";
+      return `
+        <li>
+          <button type="button" class="chat-thread-card${isActive ? " is-active" : ""}" data-chat-thread="${escapeAttribute(t.id)}">
+            <span class="chat-thread-card-kicker">${escapeText(t.model || providerLabel || "asistente")}</span>
+            <span class="chat-thread-card-title">${escapeText(title)}</span>
+            <span class="chat-thread-card-meta">
+              <span>${escapeText(dateLabel)}</span>
+              ${providerLabel ? `<span class="chat-thread-card-chip">${escapeText(providerLabel)}</span>` : ""}
+            </span>
+          </button>
+        </li>
+      `;
+    })
+    .join("");
+  list.querySelectorAll("[data-chat-thread]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.chatThread;
+      if (String(id) === String(state.chatCurrentThreadId)) return;
+      state.chatCurrentThreadId = id;
+      window.localStorage.setItem(CHAT_THREAD_KEY, String(id));
+      state.chatMessages = [];
+      renderChatThreads();
+      renderChatMessages();
+      await loadChatMessages(id);
+      renderChatMessages();
+    });
+  });
+}
+
+function providerLabelFor(providerId) {
+  if (!providerId) return null;
+  const found = (state.chatProviders || []).find((p) => p.id === providerId);
+  return found ? (found.label || found.id) : providerId;
+}
+
+function formatChatDate(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    if (sameDay) {
+      return d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+    }
+    return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short" });
+  } catch (e) {
+    return "";
+  }
+}
+
+function renderChatMessages() {
+  const container = chatEl("chat-messages");
+  if (!container) return;
+  const messages = state.chatMessages || [];
+  if (messages.length === 0 && !state.chatSending) {
+    container.innerHTML = `
+      <div class="chat-messages-empty">
+        <strong>Empezá la conversación</strong>
+        <p>Tocá una acción rápida abajo o escribí tu pregunta. El asistente puede ayudarte con análisis, conceptos y revisión del portfolio.</p>
+      </div>
+    `;
+    return;
+  }
+  const parts = messages.map((m) => renderChatMessageMarkup(m));
+  if (state.chatSending) {
+    parts.push(`
+      <div class="chat-message chat-message-assistant">
+        <div class="chat-message-bubble is-loading" aria-live="polite">Pensando…</div>
+      </div>
+    `);
+  }
+  if (state.chatError) {
+    parts.push(`
+      <div class="chat-message chat-message-assistant">
+        <div class="chat-message-bubble is-error">${escapeText(state.chatError)}</div>
+      </div>
+    `);
+  }
+  container.innerHTML = parts.join("");
+  // Auto-scroll to bottom on every render.
+  window.requestAnimationFrame(() => {
+    container.scrollTop = container.scrollHeight;
+  });
+}
+
+function renderChatMessageMarkup(message) {
+  const role = message.role === "user" ? "user" : "assistant";
+  const bubbleClass = role === "user" ? "chat-message-user" : "chat-message-assistant";
+  const content = role === "assistant" ? renderMarkdown(message.content || "") : escapeText(message.content || "").replace(/\n/g, "<br>");
+  const meta = role === "assistant" ? renderChatMessageMeta(message) : "";
+  return `
+    <div class="chat-message ${bubbleClass}">
+      <div class="chat-message-bubble">${content}</div>
+      ${meta ? `<div class="chat-message-meta">${meta}</div>` : ""}
+    </div>
+  `;
+}
+
+function renderChatMessageMeta(message) {
+  const provider = providerLabelFor(message.provider) || message.provider || "";
+  const model = message.model || "";
+  const tokensIn = message.tokens_in;
+  const tokensOut = message.tokens_out;
+  const cost = message.cost_usd;
+  const bits = [];
+  if (provider) bits.push(escapeText(provider));
+  if (model) bits.push(escapeText(model));
+  if (tokensIn != null || tokensOut != null) {
+    bits.push(`${tokensIn || 0}↑ / ${tokensOut || 0}↓ tok`);
+  }
+  if (cost != null && !Number.isNaN(Number(cost))) {
+    bits.push(`$${Number(cost).toFixed(4)}`);
+  }
+  return bits.join(" · ");
+}
+
+// ----- Tiny inline markdown renderer -----
+// Covers: triple-backtick code fences, inline code, bold (**text**),
+// links [text](href), bullet lists, paragraph breaks. Newlines preserved.
+function renderMarkdown(src) {
+  if (!src) return "";
+  const text = String(src);
+  // Pull code fences out first so we don't transform their contents.
+  const fences = [];
+  let working = text.replace(/```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g, (match, lang, body) => {
+    fences.push({ lang: lang || "", body: body.replace(/\n$/, "") });
+    return ` FENCE${fences.length - 1} `;
+  });
+
+  // Escape everything else.
+  working = escapeText(working);
+
+  // Inline code: `code`
+  working = working.replace(/`([^`\n]+)`/g, (_m, code) => `<code>${code}</code>`);
+
+  // Bold: **text**
+  working = working.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+
+  // Links: [text](href) — only allow http(s) and mailto to avoid XSS via javascript: URLs.
+  working = working.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label, href) => {
+    const safe = /^(https?:|mailto:)/i.test(href) ? href : "#";
+    return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  });
+
+  // Bullet lists: group consecutive lines starting with "- " or "* ".
+  const lines = working.split(/\n/);
+  const out = [];
+  let buffer = [];
+  let inList = false;
+  const flushParagraph = () => {
+    if (buffer.length) {
+      out.push(`<p>${buffer.join("<br>")}</p>`);
+      buffer = [];
+    }
+  };
+  for (const raw of lines) {
+    const line = raw;
+    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+    if (bullet) {
+      flushParagraph();
+      if (!inList) { out.push("<ul>"); inList = true; }
+      out.push(`<li>${bullet[1]}</li>`);
+      continue;
+    }
+    if (inList) { out.push("</ul>"); inList = false; }
+    if (line.trim() === "") {
+      flushParagraph();
+      continue;
+    }
+    buffer.push(line);
+  }
+  if (inList) out.push("</ul>");
+  flushParagraph();
+
+  let html = out.join("");
+
+  // Restore code fences.
+  html = html.replace(/ FENCE(\d+) /g, (_m, idx) => {
+    const fence = fences[Number(idx)];
+    if (!fence) return "";
+    return `<pre><code>${escapeText(fence.body)}</code></pre>`;
+  });
+
+  return html;
+}
+
+function renderChatUsage() {
+  const node = chatEl("chat-usage");
+  if (!node) return;
+  const usage = state.chatUsage;
+  if (!usage) {
+    node.innerHTML = "";
+    return;
+  }
+  const total = Number(usage.total_cost_usd || 0).toFixed(4);
+  const byProvider = usage.by_provider || {};
+  const providerRows = Object.entries(byProvider)
+    .map(([provider, value]) => {
+      const cost = typeof value === "number" ? value : (value && value.cost_usd) || 0;
+      return `<div class="chat-usage-row"><span>${escapeText(providerLabelFor(provider) || provider)}</span><span>$${Number(cost).toFixed(4)}</span></div>`;
+    })
+    .join("");
+  node.innerHTML = `
+    <div class="chat-usage-total">$${total} / mes</div>
+    ${providerRows}
+  `;
+}
+
+function renderChatQuickActions() {
+  const node = chatEl("chat-quick-actions");
+  if (!node) return;
+  node.innerHTML = CHAT_QUICK_ACTIONS
+    .map((label) => `<button type="button" class="chat-quick-action" data-chat-action="${escapeAttribute(label)}">${escapeText(label)}</button>`)
+    .join("");
+  node.querySelectorAll("[data-chat-action]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const input = chatEl("chat-input");
+      if (!input) return;
+      input.value = btn.dataset.chatAction || "";
+      input.focus();
+      autoGrowChatInput(input);
+    });
+  });
+}
+
+async function createChatThread(title) {
+  if (!state.accessToken) return;
+  try {
+    const body = title ? { title } : {};
+    const thread = await fetchJson("/chat/threads", {
+      method: "POST",
+      auth: true,
+      body: JSON.stringify(body)
+    });
+    if (!thread || !thread.id) return;
+    state.chatThreads = [thread, ...(state.chatThreads || [])];
+    state.chatCurrentThreadId = thread.id;
+    window.localStorage.setItem(CHAT_THREAD_KEY, String(thread.id));
+    state.chatMessages = [];
+    renderChatThreads();
+    renderChatMessages();
+    return thread;
+  } catch (error) {
+    state.chatError = error.message || String(error);
+    renderChatMessages();
+  }
+}
+
+async function sendChatMessage(content) {
+  const trimmed = String(content || "").trim();
+  if (!trimmed || state.chatSending) return;
+  if (!state.accessToken) return;
+
+  // Ensure a thread exists before sending.
+  if (!state.chatCurrentThreadId) {
+    const created = await createChatThread(trimmed.slice(0, 60));
+    if (!created) return;
+  }
+
+  state.chatError = null;
+  state.chatSending = true;
+  state.chatRequestId += 1;
+  const requestId = state.chatRequestId;
+
+  // Optimistic user-message append.
+  state.chatMessages = [
+    ...state.chatMessages,
+    {
+      id: `local-${requestId}`,
+      role: "user",
+      content: trimmed,
+      provider: state.chatCurrentProvider,
+      created_at: new Date().toISOString()
+    }
+  ];
+  renderChatMessages();
+
+  try {
+    const payload = {
+      role: "user",
+      content: trimmed
+    };
+    if (state.chatCurrentProvider) payload.provider = state.chatCurrentProvider;
+    const response = await fetchJson(`/chat/threads/${encodeURIComponent(state.chatCurrentThreadId)}/messages`, {
+      method: "POST",
+      auth: true,
+      body: JSON.stringify(payload)
+    });
+    if (requestId !== state.chatRequestId) return;
+    if (response && response.assistant_message) {
+      state.chatMessages = [...state.chatMessages, response.assistant_message];
+    }
+    // Refresh usage in the background — don't block the UI.
+    refreshChatUsage();
+  } catch (error) {
+    if (requestId === state.chatRequestId) {
+      state.chatError = error.message || String(error);
+    }
+  } finally {
+    if (requestId === state.chatRequestId) {
+      state.chatSending = false;
+    }
+    renderChatMessages();
+  }
+}
+
+async function refreshChatUsage() {
+  try {
+    const usage = await fetchJson("/chat/usage", { auth: true });
+    state.chatUsage = usage || null;
+    renderChatUsage();
+  } catch (error) {
+    // Non-fatal — usage stays stale.
+  }
+}
+
+function handleChatFormSubmit(event) {
+  event.preventDefault();
+  const input = chatEl("chat-input");
+  if (!input) return;
+  const value = input.value;
+  if (!value.trim()) return;
+  input.value = "";
+  autoGrowChatInput(input);
+  sendChatMessage(value);
+}
+
+function autoGrowChatInput(input) {
+  if (!input) return;
+  input.style.height = "auto";
+  // Grow up to ~6 rows (matching CSS max-height: 168px).
+  const next = Math.min(input.scrollHeight, 168);
+  input.style.height = `${next}px`;
+}
+
+// Bind events on container elements that exist on first DOM load. Idempotent.
+let _chatEventsBound = false;
+function bindChatEventsOnce() {
+  if (_chatEventsBound) return;
+  _chatEventsBound = true;
+  bindChatPanelEvents();
+}
+
+function bindChatPanelEvents() {
+  const newBtn = chatEl("chat-new-thread");
+  if (newBtn && !newBtn.dataset.bound) {
+    newBtn.dataset.bound = "1";
+    newBtn.addEventListener("click", () => createChatThread());
+  }
+  const form = chatEl("chat-composer");
+  if (form && !form.dataset.bound) {
+    form.dataset.bound = "1";
+    form.addEventListener("submit", handleChatFormSubmit);
+  }
+  const input = chatEl("chat-input");
+  if (input && !input.dataset.bound) {
+    input.dataset.bound = "1";
+    input.addEventListener("input", () => autoGrowChatInput(input));
+    input.addEventListener("keydown", (event) => {
+      // Submit on Enter (without Shift) — standard chat UX.
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        handleChatFormSubmit(event);
+      }
+    });
+  }
 }
 
 function glossaryCategories() {
@@ -1178,6 +1364,21 @@ function matchesLearningQuery(term, query) {
 }
 
 function renderGlossary() {
+  // Glossary data is lazy-loaded. If it isn't ready yet (first time the
+  // user opens Learning), kick off the fetch + show a quick skeleton and
+  // re-render once it lands.
+  if (!GLOSSARY_TERMS.length) {
+    if (elements.learningGrid) {
+      elements.learningGrid.innerHTML = `
+        <article class="learning-empty-state">
+          <strong>Cargando diccionario…</strong>
+          <p>Estamos trayendo todos los conceptos. Demora menos de un segundo.</p>
+        </article>
+      `;
+    }
+    ensureGlossaryLoaded().then(() => renderGlossary());
+    return;
+  }
   const categories = glossaryCategories();
   const categoryTerms = state.learningFilter === "all"
     ? GLOSSARY_TERMS
@@ -1757,6 +1958,7 @@ function renderPortfolioSummary(summary) {
     elements.portfolioSummaryGrid.innerHTML = "";
     elements.holdingsGrid.innerHTML = "";
     renderBenchmarkBars(summary);
+    renderExposureCards(summary);
     return;
   }
 
@@ -1811,6 +2013,7 @@ function renderPortfolioSummary(summary) {
   `;
 
   renderBenchmarkBars(summary);
+  renderExposureCards(summary);
 
   elements.holdingsGrid.innerHTML = summary.positions
     .map((position) => {
@@ -1961,6 +2164,117 @@ function saveCustomBenchmarks(list) {
   try {
     window.localStorage.setItem(CUSTOM_BENCHMARKS_KEY, JSON.stringify(list));
   } catch (err) {}
+}
+
+// ============================================================
+//  Sector + region exposure cards
+//  Horizontal stacked bar + colored legend chips. One palette per
+//  card, derived via HSL rotation around the existing tokens so the
+//  buckets stay distinguishable but still feel native to the
+//  editorial theme. Up to 8 hues — anything beyond that wraps.
+// ============================================================
+
+// 8 hand-tuned HSL anchors. The first four ride the existing palette
+// (citrus = bull-ish primary, bull-green, bear-orange, neutral-amber);
+// the remaining four are derivations rotated around the colour wheel
+// at editorial saturation so they don't fight the bull/bear cues.
+const EXPOSURE_HUES = [
+  "hsl(78 70% 56%)",   // citrus (anchor)
+  "hsl(96 55% 55%)",   // bull green (anchor)
+  "hsl(22 75% 58%)",   // bear orange (anchor)
+  "hsl(42 70% 55%)",   // neutral amber (anchor)
+  "hsl(192 55% 55%)",  // teal — cool, distinct from green
+  "hsl(258 50% 65%)",  // soft violet — non-aggressive accent
+  "hsl(340 55% 62%)",  // rose — separates from bear orange
+  "hsl(168 45% 50%)"   // muted seafoam — terminates the rotation
+];
+
+function pickExposureHue(index) {
+  return EXPOSURE_HUES[index % EXPOSURE_HUES.length];
+}
+
+function renderExposureChart(containerId, buckets) {
+  // containerId is the BAR container id; we derive the legend id by
+  // swapping the prefix. Keeps the call site terse.
+  const bar = document.getElementById(containerId);
+  const legendId = containerId.replace("exposure-bar-", "exposure-legend-");
+  const legend = document.getElementById(legendId);
+  if (!bar || !legend) return;
+
+  const list = Array.isArray(buckets) ? buckets.filter((b) => b && b.pct > 0) : [];
+
+  if (!list.length) {
+    // Skeleton: a single dim segment + a placeholder chip. Stops the
+    // card from collapsing when the portfolio is empty or all-unknown.
+    bar.innerHTML = `<div class="exposure-bar-segment is-skeleton" style="flex-grow:1"></div>`;
+    legend.innerHTML = `<span class="exposure-legend-item is-skeleton"><span class="exposure-legend-chip"></span><span class="exposure-legend-label">Sin datos</span></span>`;
+    return;
+  }
+
+  // Build segments + legend in lockstep so colors stay in sync.
+  const segments = list.map((bucket, idx) => {
+    const hue = pickExposureHue(idx);
+    const pctScaled = Math.max(bucket.pct * 100, 0.5); // floor so very small slices stay visible
+    const titleText = `${bucket.label}: ${(bucket.pct * 100).toFixed(1)}%`;
+    return `<div
+      class="exposure-bar-segment"
+      data-bucket-index="${idx}"
+      style="flex-grow:${pctScaled};background:${hue};"
+      title="${escapeHtml(titleText)}"
+    ></div>`;
+  }).join("");
+
+  const legendItems = list.map((bucket, idx) => {
+    const hue = pickExposureHue(idx);
+    return `<span class="exposure-legend-item" data-bucket-index="${idx}">
+      <span class="exposure-legend-chip" style="background:${hue};"></span>
+      <span class="exposure-legend-label">${escapeHtml(bucket.label)}</span>
+      <span class="exposure-legend-pct">${(bucket.pct * 100).toFixed(1)}%</span>
+    </span>`;
+  }).join("");
+
+  bar.innerHTML = segments;
+  legend.innerHTML = legendItems;
+}
+
+function renderExposureCards(summary) {
+  if (!elements.exposureBarSector || !elements.exposureBarRegion) return;
+
+  const sectors = Array.isArray(summary?.sector_exposure) ? summary.sector_exposure : [];
+  const regions = Array.isArray(summary?.region_exposure) ? summary.region_exposure : [];
+
+  renderExposureChart("exposure-bar-sector", sectors);
+  renderExposureChart("exposure-bar-region", regions);
+
+  // Hint line above each bar: "N sectores · top = Tech 60%".
+  if (elements.exposureHintSector) {
+    if (sectors.length) {
+      const top = sectors[0];
+      elements.exposureHintSector.textContent = `${sectors.length} sector${sectors.length === 1 ? "" : "es"} · top ${top.label} ${(top.pct * 100).toFixed(0)}%`;
+    } else {
+      elements.exposureHintSector.textContent = "—";
+    }
+  }
+  if (elements.exposureHintRegion) {
+    if (regions.length) {
+      const top = regions[0];
+      elements.exposureHintRegion.textContent = `${regions.length} región${regions.length === 1 ? "" : "es"} · top ${top.label} ${(top.pct * 100).toFixed(0)}%`;
+    } else {
+      elements.exposureHintRegion.textContent = "—";
+    }
+  }
+}
+
+// Lightweight escape — the labels come from the backend so we expect
+// safe values, but defensive HTML escaping never hurts in innerHTML
+// paths.
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function renderBenchmarkBars(summary) {
@@ -2776,6 +3090,9 @@ async function analyzeTicker(nextTicker = state.ticker) {
     } else {
       renderTickerEarningsError("No se pudo consultar el calendario.");
     }
+    // History uses its own endpoint + cache; fire-and-forget so a slow yfinance
+    // hop never blocks the cached analysis paint.
+    renderSurpriseHistory(ticker);
     setLoading(false);
     setStatus(`Análisis listo para ${ticker}. Resultado servido desde cache local.`);
     return;
@@ -2828,6 +3145,9 @@ async function analyzeTicker(nextTicker = state.ticker) {
     } else {
       renderTickerEarningsError(earningsResult.reason?.message || "No se pudo consultar el calendario.");
     }
+    // Surprise history runs independently (separate endpoint + 24h cache) so we
+    // don't gate the rest of the analysis paint on yfinance's historical hop.
+    renderSurpriseHistory(ticker);
     const cedearMessage = state.universe.includes(ticker)
       ? "Ticker con CEDEAR disponible."
       : "Ticker fuera del universo CEDEAR sugerido. Se analiza igual, pero no se usará en rankings.";
@@ -3387,6 +3707,86 @@ function renderEarningsEventCard(event, options = {}) {
   `;
 }
 
+// Tracks the latest in-flight surprise-history request so a fast ticker swap
+// doesn't paint stale data over the new selection.
+let surpriseHistoryRequestId = 0;
+
+function formatSurprisePct(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "n/d";
+  const pct = value * 100;
+  const sign = pct > 0 ? "+" : "";
+  return `${sign}${pct.toFixed(1)}%`;
+}
+
+function renderSurpriseHistoryCell(event) {
+  // beat flag drives the bull/bear tint. surprise_pct is the magnitude chip.
+  // next_day_return_pct is shown below — useful because sometimes the print
+  // is a beat but the stock still sells off on guidance.
+  const tone = event.beat === true ? "bull" : event.beat === false ? "bear" : "neutral";
+  const surpriseLabel = formatSurprisePct(event.surprise_pct);
+  const moveLabel = formatSurprisePct(event.next_day_return_pct);
+  const moveTone =
+    event.next_day_return_pct === null || event.next_day_return_pct === undefined
+      ? "neutral"
+      : event.next_day_return_pct >= 0
+        ? "bull"
+        : "bear";
+  return `
+    <article class="earnings-history-cell ${tone}" title="${escapeAttribute(`${event.fiscal_quarter} · ${event.report_date}`)}">
+      <div class="earnings-history-cell-head">
+        <span class="earnings-history-quarter">${escapeText(event.fiscal_quarter)}</span>
+        <span class="signal-chip ${tone}">${escapeText(surpriseLabel)}</span>
+      </div>
+      <div class="earnings-history-meta">
+        <span class="earnings-history-date">${escapeText(event.report_date)}</span>
+        <span class="signal-chip ${moveTone}">D+1 ${escapeText(moveLabel)}</span>
+      </div>
+    </article>
+  `;
+}
+
+function renderSurpriseHistorySkeleton() {
+  if (!elements.tickerEarningsHistory) return;
+  const cells = Array.from({ length: 12 })
+    .map(() => `<article class="earnings-history-cell is-skeleton" aria-hidden="true"></article>`)
+    .join("");
+  elements.tickerEarningsHistory.innerHTML = cells;
+}
+
+function renderSurpriseHistoryEmpty() {
+  if (!elements.tickerEarningsHistory) return;
+  elements.tickerEarningsHistory.innerHTML = `
+    <p class="earnings-history-empty">No tenemos surprise history para este ticker.</p>
+  `;
+}
+
+async function renderSurpriseHistory(ticker) {
+  if (!elements.tickerEarningsHistory) return;
+  const symbol = (ticker || "").toUpperCase().trim();
+  if (!symbol) {
+    elements.tickerEarningsHistory.innerHTML = "";
+    return;
+  }
+  const requestId = ++surpriseHistoryRequestId;
+  renderSurpriseHistorySkeleton();
+  try {
+    const payload = await fetchJson(`/earnings/${encodeURIComponent(symbol)}/history?limit=12`);
+    if (requestId !== surpriseHistoryRequestId) return; // a newer ticker won
+    const events = Array.isArray(payload?.events) ? payload.events : [];
+    if (!events.length) {
+      renderSurpriseHistoryEmpty();
+      return;
+    }
+    elements.tickerEarningsHistory.innerHTML = events
+      .slice(0, 12)
+      .map((event) => renderSurpriseHistoryCell(event))
+      .join("");
+  } catch (error) {
+    if (requestId !== surpriseHistoryRequestId) return;
+    renderSurpriseHistoryEmpty();
+  }
+}
+
 function renderBacktest(backtest) {
   if (!backtest) {
     elements.backtestTitle.textContent = "Sin backtest disponible";
@@ -3425,6 +3825,15 @@ elements.form.addEventListener("submit", (event) => {
 
 elements.surfaceButtons.forEach((button) => {
   button.addEventListener("click", () => setSurface(button.dataset.surface));
+  // Prefetch heavier surface bundles when the user hovers/focuses the tab,
+  // so by the time they click, data is in cache. Currently only Learning
+  // benefits (glossary.js is lazy-loaded). Future: chat module on
+  // pointerenter of an Asistente tab.
+  if (button.dataset.surface === "learning") {
+    const warm = () => ensureGlossaryLoaded();
+    button.addEventListener("pointerenter", warm, { once: true });
+    button.addEventListener("focus", warm, { once: true });
+  }
 });
 
 elements.accountShortcut.addEventListener("click", () => {
@@ -3503,6 +3912,21 @@ if (elements.rankingModeButtons && elements.rankingModeButtons.length) {
     button.addEventListener("click", () => setRankingMode(button.dataset.rankingMode));
   });
   syncRankingModeButtons();
+}
+
+if (elements.diagnosticsRefresh) {
+  elements.diagnosticsRefresh.addEventListener("click", () => loadDiagnostics());
+}
+
+if (elements.diagnosticsToggleOnlyBad) {
+  elements.diagnosticsToggleOnlyBad.addEventListener("click", () => {
+    _diagnosticsOnlyBad = !_diagnosticsOnlyBad;
+    elements.diagnosticsToggleOnlyBad.classList.toggle("is-active", _diagnosticsOnlyBad);
+    elements.diagnosticsToggleOnlyBad.textContent = _diagnosticsOnlyBad
+      ? "Mostrar todas"
+      : "Sólo problemáticas";
+    if (_diagnosticsCache) renderDiagnostics(_diagnosticsCache);
+  });
 }
 
 if (elements.earningsBannerDismiss) {

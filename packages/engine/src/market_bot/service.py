@@ -146,6 +146,18 @@ class MarketBotService:
         if not universe:
             return self._rankings_cache.set(cache_key, [])
 
+        # Warm the adapter's price cache with a single batched yfinance call
+        # so each thread-pool worker hits a cache instead of issuing its own
+        # HTTP request. Best-effort: if the adapter doesn't expose the
+        # method (custom adapter / test stub) or the batch fails, the per-
+        # ticker path still works — it's just slower.
+        prefetch = getattr(self.adapter, "prefetch_universe", None)
+        if callable(prefetch):
+            try:
+                prefetch(universe, horizon)
+            except Exception:
+                pass
+
         max_workers = min(6, len(universe))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_map = {

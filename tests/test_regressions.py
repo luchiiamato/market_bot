@@ -748,6 +748,69 @@ def test_ticker_earnings_endpoint_uses_server_side_cache(api_client, monkeypatch
     assert calls["count"] == 1
 
 
+def test_public_earnings_history_endpoint_returns_grid_payload(api_client, monkeypatch):
+    """The 4x3 surprise grid endpoint must be reachable anonymously (like the
+    other earnings reads) and serialise the adapter rows via the response
+    schema. We monkeypatch the adapter so the test runs offline — yfinance
+    network access is unreliable in CI."""
+    import services.api.app as app_module
+
+    def fake_history(ticker, limit=12):
+        assert limit == 12
+        return [
+            {
+                "fiscal_quarter": "Q1 FY26",
+                "report_date": "2026-02-26",
+                "eps_estimate": 0.18,
+                "eps_actual": 0.22,
+                "surprise_pct": 0.2222,
+                "beat": True,
+                "next_day_return_pct": 0.084,
+                "next_day_close_date": "2026-02-27",
+            },
+            {
+                "fiscal_quarter": "Q4 FY25",
+                "report_date": "2025-11-20",
+                "eps_estimate": 0.20,
+                "eps_actual": 0.15,
+                "surprise_pct": -0.25,
+                "beat": False,
+                "next_day_return_pct": -0.061,
+                "next_day_close_date": "2025-11-21",
+            },
+        ]
+
+    monkeypatch.setattr(app_module, "fetch_earnings_history", fake_history)
+
+    response = api_client.get("/earnings/SNOW/history")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["ticker"] == "SNOW"
+    assert len(payload["events"]) == 2
+    first = payload["events"][0]
+    assert first["fiscal_quarter"] == "Q1 FY26"
+    assert first["beat"] is True
+    assert first["surprise_pct"] == 0.2222
+    assert first["next_day_close_date"] == "2026-02-27"
+    assert payload["events"][1]["beat"] is False
+
+
+def test_earnings_history_endpoint_soft_fails_when_adapter_returns_empty(api_client, monkeypatch):
+    """If yfinance has no history (recent IPO, ticker typo) we still want a
+    200 with an empty list — the UI renders the friendly empty state. A 5xx
+    here would tank the whole earnings panel which is unacceptable."""
+    import services.api.app as app_module
+
+    monkeypatch.setattr(app_module, "fetch_earnings_history", lambda ticker, limit=12: [])
+
+    response = api_client.get("/earnings/FOO/history?limit=8")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload == {"ticker": "FOO", "events": []}
+
+
 def test_market_overview_endpoint_uses_server_side_cache(api_client, monkeypatch):
     import services.api.app as app_module
 

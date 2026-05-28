@@ -231,8 +231,18 @@ class PositionValuationResponse(BaseModel):
     return_pct_ars: float
     return_pct_usd: float
     real_return_pct: float
+    preferred_benchmark_return_pct: float = 0.0
+    preferred_benchmark_label: str = "inflation"
     benchmark_comparisons: list[BenchmarkComparisonResponse]
     notes: list[str]
+
+
+class ExposureBucketResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    label: str
+    total_value_ars: float
+    pct: float
 
 
 class PortfolioSummaryResponse(BaseModel):
@@ -248,7 +258,11 @@ class PortfolioSummaryResponse(BaseModel):
     total_return_pct_ars: float
     total_return_pct_usd: float
     total_real_return_pct: float
+    total_preferred_benchmark_return_pct: float = 0.0
+    preferred_benchmark_label: str = "inflation"
     positions: list[PositionValuationResponse]
+    sector_exposure: list[ExposureBucketResponse] = Field(default_factory=list)
+    region_exposure: list[ExposureBucketResponse] = Field(default_factory=list)
 
 
 class ExchangeRatesResponse(BaseModel):
@@ -297,6 +311,22 @@ class EarningsEventResponse(BaseModel):
     eps_actual: Optional[float] = None
     revenue_estimate: Optional[float] = None
     revenue_actual: Optional[float] = None
+
+
+class EarningsHistoryEventResponse(BaseModel):
+    fiscal_quarter: str
+    report_date: date
+    eps_estimate: Optional[float] = None
+    eps_actual: Optional[float] = None
+    surprise_pct: Optional[float] = None
+    beat: Optional[bool] = None
+    next_day_return_pct: Optional[float] = None
+    next_day_close_date: Optional[date] = None
+
+
+class EarningsHistoryResponse(BaseModel):
+    ticker: str
+    events: list[EarningsHistoryEventResponse] = Field(default_factory=list)
 
 
 class BalanzImportSkipResponse(BaseModel):

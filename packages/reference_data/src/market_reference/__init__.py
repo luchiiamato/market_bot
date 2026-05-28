@@ -4,9 +4,15 @@ from .benchmarks import (
     ExchangeRates,
     PeriodBenchmarkSnapshot,
 )
+from .classification import (
+    TICKER_CLASSIFICATION,
+    aggregate_exposure,
+    classify_ticker,
+)
 from .earnings import (
     EarningsEvent,
     EarningsIngestionError,
+    fetch_earnings_history,
     sync_earnings_for_tickers,
     upcoming_earnings,
 )
@@ -22,8 +28,12 @@ __all__ = [
     "ArgentinaBenchmarkService",
     "ExchangeRates",
     "PeriodBenchmarkSnapshot",
+    "TICKER_CLASSIFICATION",
+    "aggregate_exposure",
+    "classify_ticker",
     "EarningsEvent",
     "EarningsIngestionError",
+    "fetch_earnings_history",
     "sync_earnings_for_tickers",
     "upcoming_earnings",
     "NewsIngestionError",

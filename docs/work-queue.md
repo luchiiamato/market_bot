@@ -647,7 +647,16 @@ Mientras tanto, simular órdenes para que el user pueda testear estrategias.
 - `GET /paper/performance` con métricas tipo backtest.
 - UI: "Practice mode" toggle que reemplaza Buy/Sell por "Simular compra/venta".
 
-### 6.6 · Sector + region exposure breakdown `[ ]`
+### 6.6 · Sector + region exposure breakdown `[x]`
+
+> ✅ DONE 2026-05-29 por agent paralelo. Nuevo módulo
+> `packages/reference_data/.../classification.py` con tabla hand-maintained
+> `TICKER_CLASSIFICATION` cubriendo ~60 tickers de `CEDEAR_UNIVERSE` mapped a
+> sector + region. Funciones `classify_ticker` + `aggregate_exposure`.
+> `PortfolioSummary` ahora incluye `sector_exposure` y `region_exposure`
+> (lista de `ExposureBucket`). UI: dos cards "Concentración por sector" y
+> "Concentración por región" con horizontal stacked bar + legend. 5 tests
+> nuevos en `tests/test_exposure.py`. 71/71 tests pasan.
 
 **Por qué**: el user ve P&L total pero no sabe que está 60% en tech o que tiene
 muy poca diversificación geográfica.
@@ -705,6 +714,376 @@ hubiera pasado.
 - Componente tour con 4 steps: (1) cargar perfil, (2) importar Balanz, (3)
   ver análisis del primer ticker, (4) abrir ranking de oportunidades.
 - Dismissable, no reaparece.
+
+---
+
+## 4.8 · NEW SPRINT — Sprint 7 · Core engine, calculations & performance `[ ]`
+
+> **Prioridad crítica.** Es donde más se nota cuando algo está mal. El user
+> reportó números que no cuadran (ARS=7.83M vs cost=17M = −54% improbable) y
+> el ranking lento. Antes de cualquier feature nuevo grande hay que asegurar
+> que el core no miente y responde rápido. Si los números mienten, todo lo
+> demás del producto es entretenimiento.
+
+### 7.1 · Auditoría de cálculos end-to-end `[~]` parcial
+
+**Por qué**: el user reportó `current_value_ars` que no coincide con la realidad
+del mercado. La sospecha #1 es yfinance devolviendo precios stale o mapeados
+mal para `.BA` (BYMA). Antes ya tocamos cost basis, ratio canonical, USD via
+CCL — falta cerrar el último gap.
+
+**Plan**
+
+- **Smoke test offline contra fixture de precios reales** — armar un dataset
+  hard-coded con 5-10 posiciones de prueba y precios de cierre auditados manualmente
+  (1 día específico). Test que valida `current_value_ars`, `cost_basis_ars`, P&L,
+  benchmarks: si la suma cambia frente al fixture, falla CI.
+- **Per-position diagnostics surface en UI** — exponer en una vista de
+  developer/debug (route `/portfolio/diagnostics` ya existe en backend, falta
+  consumir en frontend) qué precio devuelve yfinance por cada `.BA`, qué ratio
+  usa, y si el FX implícito vs CCL hace `drift > 25%`. Tile rojo si rompe.
+- **Validar mapping BYMA**: muchos `.BA` tienen sufijo distinto en yfinance
+  (ej. BRKB vs BRK.B, NU vs NUBANK). Tabla canónica `byma_yfinance_overrides`
+  con mappings verificados, paralela a `CANONICAL_CEDEAR_RATIOS`.
+- **Fallback explícito cuando yfinance devuelve algo absurdo**: si el local
+  ARS price implica un FX > 30% off del CCL, reject + warning visible
+  ("precio local sospechoso para SYM") en lugar de devolver número roto silente.
+- **Logging estructurado de cada fetch yfinance**: ticker, period requested,
+  rows returned, last close, latency. Hoy es black box — si se rompe, no
+  sabemos por qué. Va a `logging_config` que ya tenemos.
+
+**DoD**
+- Test de regresión con un caso real del user que hoy falle y pase con el fix.
+- UI: panel "Diagnóstico de valuación" en /portfolio con drift % por posición.
+- 100% de las posiciones del user con `drift_fx < 25%` o, si no, warning visible.
+
+### 7.2 · Real return refactor — respetar `benchmark_preference` del perfil `[x]`
+
+> ✅ DONE 2026-05-29 por Claude. Modelo `PositionValuation` y `PortfolioSummary` ahora
+> exponen `preferred_benchmark_return_pct` + `preferred_benchmark_label` además del
+> canónico `real_return_pct` (vs inflación). Service.py popula los dos: el primero usa
+> `_aggregate_preferred_benchmark_return` con `PREFERENCE_TO_COMPARISON_LABEL` mapping
+> ({official→official_usd, mep→mep_usd, ccl→ccl_usd}). Schema actualizado.
+> UI puede mostrar dinámicamente "Real vs {label}" en lugar del fijo "vs Inflación".
+
+**Por qué**: hoy `real_return_pct` siempre se computa vs inflación. Si el user
+eligió MEP como benchmark de preferencia, "Real return" debería ser vs MEP, no
+vs inflación. La definición actual es defendible pero el label engaña.
+
+**Plan**
+- Refactor `_aggregate_real_return` para tomar `benchmark_preference` y elegir
+  el `tracked_value_ars` adecuado.
+- Renombrar el label en UI a "Real vs {benchmark elegido}" (dinámico).
+- Tooltip explicando: "Si querés ver vs inflación, cambiá tu benchmark
+  preference en Settings".
+
+### 7.3 · Performance · paralelización + cache layers `[x]`
+
+> ✅ DONE 2026-05-29 por agent paralelo + integración por Claude.
+> **Portfolio service**: nuevo `prefetch_quotes(symbols)` que hace una sola
+> `yf.download(["AAPL","AAPL.BA",...], group_by="ticker", threads=True)` antes del
+> loop de valuación → warmea `_quote_cache`. TTL del cache: 300s → 900s.
+> **Engine adapter**: `prefetch_universe(tickers, horizon)` análogo para rankings.
+> `rank_universe` llama a `prefetch_universe` antes del ThreadPoolExecutor.
+> **Cache warming es best-effort**: cualquier failure (offline, network) cae a
+> per-ticker `_latest_close` sin romper tests. Structured log JSON
+> `"yfinance batch fetch"` con symbols / elapsed_ms / hit_rate.
+> Tests: `tests/test_batch_prefetch.py` (4 nuevos · MultiIndex, missing tickers,
+> exception handling, adapter cache). **64/64 tests pasan.**
+
+**Por qué**: cargar `/portfolio/summary` para 37 posiciones hoy hace fetch
+serial a yfinance (con ThreadPoolExecutor `max_workers=6` parcial). El user
+percibe latencia. `/rankings` con catalyst boost peor: itera 57 tickers, cada
+uno con análisis completo → 30-60s easy.
+
+**Plan**
+- **Yfinance batch fetch**: `yf.download(["AAPL", "GOOGL", ...])` devuelve
+  todo en una sola request. Mucho más rápido que N requests individuales.
+  Hoy `_latest_close` hace una por ticker. Refactor para batch.
+- **Redis (or in-memory LRU) layer para quotes**: TTL 5min en trading hours,
+  6h fuera. Hoy hay `TTLCache` pero solo en algunos paths. Generalizar.
+- **Análisis precomputado en background**: cron job cada 15min que precorre
+  el ranking del universo entero y guarda en SQLite. `/rankings` lee la
+  tabla, no recomputa. Trade-off: data hasta 15min stale vs respuestas <100ms.
+- **Lazy loading de positions**: si el user tiene 37 posiciones, no traer las
+  37 valuations completas en el primer paint. Cargar el header agregado
+  inmediato y las position cards a medida que scrollea (intersection observer).
+
+**DoD**
+- `/portfolio/summary` < 2s para 50 posiciones (hoy: ~10s).
+- `/rankings` < 3s primera vez, < 200ms cacheado (hoy: ~30s primera).
+- Lighthouse perf score > 85 en mobile.
+- Métrica de latencia logged JSON por endpoint (ya está en `logging_config`).
+
+### 7.4 · Validación matemática · tests con números hard-coded `[x]`
+
+> ✅ DONE 2026-05-29 por agent paralelo + integración por Claude. `tests/test_portfolio_math.py`
+> con 8 tests golden: CEDEAR ARS math, USD via CCL (no via ratio), US stock FX,
+> aggregate sum integrity, inflation/plazo_fijo factor tracking, FX rate tracking,
+> canonical ratio wins over parity, currency normalizer all variants. Cualquier
+> drift futuro en `cost_basis`, `current_value`, `pnl`, `benchmark tracking` rompe CI.
+> **60/60 tests pasan offline en 3s.**
+
+**Por qué**: el core engine (deterministic + probabilistic + ranking + portfolio)
+es donde un bug silencioso es más caro. Los tests actuales cubren happy paths,
+no validan que `pnl_ars == 904385` para fixture X. Necesitamos
+**property-based + golden tests**.
+
+**Plan**
+- Suite `tests/test_portfolio_math.py` con casos:
+  - 1 CEDEAR comprado a precio X en fecha Y, hoy a precio Z → ARS, USD, P&L exactos.
+  - Mixto ARS+USD positions → totales correctos.
+  - CCL conversion forward/backward → consistente.
+  - Benchmark tracking → fórmula exacta documentada.
+- Suite `tests/test_engine_signals.py`:
+  - Frame sintético OHLC → RSI exacto a 4 decimales.
+  - Catalyst boost cap a 1.65x → test que valida el cap.
+- Property-based con `hypothesis`: para cualquier portfolio aleatorio,
+  `total_value_ars ≈ sum(position.current_value_ars)` (no drift por float).
+- **Golden snapshots**: serializar la respuesta de `/portfolio/summary` con
+  un fixture conocido y validar byte-a-byte contra el JSON committeado.
+
+**DoD**
+- Cobertura del módulo `portfolio` > 80%.
+- Cobertura del módulo `engine.strategies` > 70%.
+- Suite total corre offline en < 5s.
+- Cualquier cambio en cost basis / ratio / benchmark math rompe al menos un golden.
+
+### 7.5 · Frontend perf · bundle + render `[x]`
+
+> ✅ DONE 2026-05-29 por Claude.
+> **Code-splitting**: `GLOSSARY_TERMS` (~50KB de data) extraído a
+> `apps/web/prototype/glossary.js`. Cargado lazy cuando el user abre la
+> Learning surface (o cuando hace hover sobre el tab — prefetch warmup).
+> El bundle inicial baja ~50KB sin tocar features.
+> **`defer` en `<script src="./app.js">`**: el JS ya no bloquea el HTML parser.
+> First paint perceible más rápido.
+> **`<link rel="prefetch">` para glossary.js** así el browser lo baja idle
+> aunque el user no abra Learning.
+> **Skeleton state "Cargando diccionario…"** en Learning si todavía no llegó.
+> `ensureGlossaryLoaded()` Promise idempotente para evitar double-load.
+
+**Por qué**: `app.js` ya pesa 2300+ líneas. Cuando metamos chat (Sprint 8) y
+más features, vamos a sentirlo. El TTI se va a degradar.
+
+**Plan**
+- Code-splitting manual: `learning.js`, `portfolio.js`, `chat.js` como módulos
+  ES separados, lazy-loaded por surface activa.
+- Defer non-critical CSS (font-variation-settings, glyph styles) tras el
+  first paint.
+- `requestIdleCallback` para el work-queue updates y el log de portfolio.
+- Reemplazar manipulación directa de innerHTML por DocumentFragment / template
+  cloning en los renders más calientes (positions grid, opportunity rows).
+
+**DoD**
+- Lighthouse perf > 90 desktop, > 80 mobile.
+- TTI < 1.5s en una conexión 4G simulada.
+
+---
+
+## 4.9 · NEW SPRINT — Sprint 8 · AI chatbot multi-provider `[ ]`
+
+> El user quiere conversar con un asistente IA sobre su portfolio, tickers,
+> conceptos financieros. Que pueda elegir proveedor (Gemini / OpenAI / Claude /
+> otros) y pegar su propia API key.
+
+### 8.1 · Backend · provider-agnostic chat layer `[x]`
+
+> ✅ DONE 2026-05-29 por agent paralelo. Nuevo módulo `packages/chat/` con
+> `providers/{base,anthropic,openai,gemini}_provider.py` (SDKs lazy-loaded,
+> sin nuevas deps en requirements.txt). `router.py` con default fallback.
+> `store.py` con tablas SQLite `chat_threads` + `chat_messages` (audit log
+> incluye tokens_in/out/cost_usd/latency_ms por turn). 6 endpoints públicos
+> nuevos en `services/api/app.py`. 10 tests offline en `tests/test_chat.py`.
+> **81/81 tests pasan.**
+
+**Plan**
+
+- `packages/chat/` nuevo módulo. Estructura:
+  ```
+  packages/chat/src/market_chat/
+    __init__.py
+    providers/
+      base.py          # ABC: ChatProvider con .stream(messages, system) → iterator
+      openai.py        # GPT-4o-mini / GPT-4o
+      anthropic.py     # Claude Sonnet 4 / Opus
+      gemini.py        # Gemini Pro / Flash
+      ollama.py        # local LLM via http (opcional, gratis)
+    router.py          # selecciona provider según config
+    context.py         # arma system prompt + inyecta contexto del user
+    schemas.py
+  ```
+- Endpoint `POST /chat/messages` (SSE streaming) y `GET /chat/threads`.
+- Persistencia mínima en SQLite: tabla `chat_threads`, `chat_messages`.
+- Rate limit: 20 messages / hour / user para evitar abuse.
+
+### 8.2 · Provider selection + key storage `[x]`
+
+> ✅ DONE 2026-05-29 (incluido en 8.1). `.env.example` con bloque CHAT_*
+> (CHAT_PROVIDER_DEFAULT, CHAT_{ANTHROPIC,OPENAI,GEMINI}_{API_KEY,MODEL}).
+> `GET /chat/providers` reporta qué hay configurado sin filtrar keys.
+> Per-user override de proveedor por thread (provider stored per-thread).
+> User-supplied API keys con encrypt-at-rest queda como 8.2b para v2.
+
+**Plan**
+
+- `.env.example` con:
+  ```
+  CHAT_PROVIDER_DEFAULT=anthropic
+  CHAT_OPENAI_API_KEY=
+  CHAT_OPENAI_MODEL=gpt-4o-mini
+  CHAT_ANTHROPIC_API_KEY=
+  CHAT_ANTHROPIC_MODEL=claude-sonnet-4-5
+  CHAT_GEMINI_API_KEY=
+  CHAT_GEMINI_MODEL=gemini-2.0-flash-exp
+  CHAT_OLLAMA_BASE_URL=
+  ```
+- Endpoint `GET /chat/providers` devuelve qué providers están configurados
+  (NO devuelve las keys, solo el bool).
+- Endpoint `PUT /chat/settings` para que el user logged-in elija qué provider
+  usar de los configurados (no setea la key — la key vive en env del backend).
+- **Opción advanced** (post-v1): permitir que el user pegue su PROPIA key
+  vía UI, encriptarla en SQLite con Fernet, y usarla en lugar de la del .env.
+  Útil para que cada user pague su propio uso.
+
+### 8.3 · Context-aware prompts `[ ]` PENDIENTE — diferenciador clave
+
+> ⏳ NO ARRANCADO. Es el feature que hace al chatbot **útil** vs. un ChatGPT
+> genérico: que sepa de tu portfolio, tu perfil, tus decisiones.
+>
+> **Plan exacto al retomar**:
+>
+> 1. **System prompt template hidratado** en `packages/chat/src/market_chat/store.py`:
+>    - Tomar `SYSTEM_PROMPT_BASELINE` actual y extenderlo con bloques opcionales:
+>      `{investor_profile}`, `{risk_tolerance}`, `{benchmark_preference}`,
+>      `{top_positions}` (top 10 holdings con valor ARS/USD), `{upcoming_earnings}`
+>      (eventos ≤7d de los holdings).
+>    - Función `build_user_context(user_id) -> str` en `store.py` que consulte
+>      `identity_service.get_profile(user_id)` + `portfolio_service.portfolio_summary(...)`
+>      + `earnings.upcoming_for_holdings(...)` y devuelva el bloque texto.
+>    - En `services/api/app.py` la ruta `POST /chat/threads/{id}/messages`,
+>      antes de llamar a `provider.chat(...)`, hidrate el system prompt con
+>      `build_user_context(current_user.user_id)`.
+>
+> 2. **Tool use / function calling** (cuando el provider lo soporta):
+>    Agregar `packages/chat/src/market_chat/tools.py` con 4 tools:
+>    - `analyze_ticker(symbol, horizon)` → llama `MarketBotService.analyze_ticker`.
+>    - `get_portfolio_summary()` → trae el summary actual del user.
+>    - `compare_to_benchmark(ticker)` → llama `custom_benchmark_comparison`.
+>    - `get_market_overview()` → tape general.
+>    Cada tool con schema JSON Schema. Los providers que soporten
+>    function calling (Claude, GPT-4, Gemini) ven el tool catalog. Los que
+>    no, reciben solo el system prompt y se las arreglan con texto.
+>
+> 3. **Quick action chips** del UI (8.4) ya están armados pero no están
+>    pre-cargados con prompts que aprovechen el contexto. Cambiar:
+>    - "Analizame mi portfolio" → manda `"Analizá mi portfolio actual y decime qué riesgo de concentración tengo y qué oportunidades ves."`
+>    - "¿Cómo viene NVDA?" → `"¿Cómo viene NVDA? Usá analyze_ticker y respondé con la lectura del motor."`
+>    - "Explicame qué es CAGR" → educacional, no toca tools.
+>    - "Mostrame mi exposición sectorial" → usa `get_portfolio_summary` para citar números.
+>
+> **DoD**:
+> - Si el user pregunta "¿qué pasa con NVDA?" sin más contexto, el bot
+>   responde con su precio actual de su POSICIÓN (no genérico).
+> - Tests offline con un fake provider que verifica que el system prompt
+>   incluye `{investor_profile}` cuando el user tiene perfil.
+> - El system prompt **no** lekea API keys ni claves internas.
+
+**Por qué**: un chatbot genérico chatGPT no agrega valor. La diferencia se
+hace cuando el bot **conoce tu portfolio, tu perfil, tus decisiones**.
+
+**Plan**
+
+- System prompt template `packages/chat/.../prompts/system.md` que el router
+  hidrata con:
+  - `{investor_profile}` del user (conservador/moderado/agresivo).
+  - `{benchmark_preference}` (MEP/CCL/etc).
+  - Posiciones actuales (top 10) con valores ARS/USD.
+  - Decisiones recientes (`user_decisions` table).
+  - Earnings próximos en holdings.
+- Tools / function calling cuando el provider lo soporta:
+  - `analyze_ticker(symbol, horizon)` → llama nuestro `MarketBotService.analyze_ticker`.
+  - `get_portfolio_summary()` → trae el summary actual.
+  - `compare_to_benchmark(amount_ars, benchmark, since_date)` → custom benchmark calc.
+  - `get_market_overview()` → tape general.
+- Que el bot pueda decir "Mirá AAPL, hoy tu posición de 40 sh vale AR$ X" y
+  no respuestas vagas tipo "te recomendaría diversificar".
+
+### 8.4 · UI del chat `[~]` ENTREGADO POR AGENT, FALTA VERIFICAR
+
+> 🟡 ENTREGADO 2026-05-29 por agent paralelo. Pendiente sanity check al
+> retomar la sesión: correr `node -e "new Function(require('fs').readFileSync('apps/web/prototype/app.js','utf8'))"`
+> + `python3 -m pytest tests/ -q` para confirmar 81/81. El agent reportó que
+> no pudo correr esos comandos en su sandbox — yo iba a hacerlo al recibir
+> la notificación pero el user pausó la ejecución.
+>
+> **Archivos modificados por este agent**:
+> - `apps/web/prototype/index.html` (+41) — surface tab "Asistente" + surface stack.
+> - `apps/web/prototype/styles.css` (+466) — `.chat-panel`, `.chat-layout`,
+>   `.chat-threads`, `.chat-message-*`, shimmer keyframe, responsive < 720px.
+> - `apps/web/prototype/app.js` (+580) — módulo Chat completo: initializeChat,
+>   loadChatMessages, renderChatGateOrPanel, renderChatProviders/Threads/Messages/Usage,
+>   `renderMarkdown` (code fences + inline code + bold + links + bullets),
+>   createChatThread, sendChatMessage (optimistic append + shimmer loading + race protection),
+>   handleChatFormSubmit (Enter envía, Shift+Enter newline), autoGrowChatInput.
+> - State extendido: `chatInitialized`, `chatLoading`, `chatSending`, `chatProviders`,
+>   `chatCurrentProvider`, `chatThreads`, `chatCurrentThreadId` (persistido en
+>   localStorage), `chatMessages`, `chatUsage`, `chatRequestId`, `chatError`.
+>
+> **Patrones que el agent inventó (a revisar)**:
+> - Loading bubble con shimmer overlay (translateX gradient).
+> - Auto-thread-on-send si no hay thread seleccionado (toma primeros 60 chars como título).
+> - Enter para enviar, Shift+Enter para newline.
+> - Auth gate con `.chat-gate` cuando no hay sesión activa.
+>
+> **Pre-flight al retomar**:
+> 1. Bump `MARKET_BOT_UI_BUILD` y los `?v=` en index.html a `20260530-sprint8`.
+> 2. Correr syntax check + tests.
+> 3. Si pasa todo, smoke-test en browser: switch surface a "Asistente", crear thread,
+>    mandar mensaje (probable que falle si no hay API key configurada — ese es el
+>    happy unhappy path, hay que ver el error message).
+
+**Plan**
+
+- Nuevo surface "Asistente" entre "Learning" y "Trading".
+- Layout: thread list a la izquierda (compact), chat panel a la derecha.
+- Streaming tokens visibles (SSE).
+- Markdown rendering (incluye tablas, código).
+- Quick-action chips arriba del input: "Analizame mi portfolio", "¿Conviene
+  vender NVDA ahora?", "Explicame qué es CAGR".
+- Provider switcher (chip arriba) — si hay múltiples configurados, el user
+  puede elegir.
+- Indicador visible del modelo activo: "Claude Sonnet 4.5 · costo $0.003/msg
+  estimado".
+
+### 8.5 · Salvaguardas + observability `[x]`
+
+> ✅ DONE 2026-05-29 (incluido en 8.1). `SYSTEM_PROMPT_BASELINE` hard-coded
+> con disclaimer "marcos de decisión, no fallo binario". Rate limit
+> 20 messages/hour/IP via `rate_limit()` existing helper. Audit log es la
+> propia tabla `chat_messages` con tokens + cost + latency por turn.
+> Endpoint `GET /chat/usage` agrega cost/tokens por provider/día/mes.
+> Pricing dict per-model best-effort (claude $3/$15, gpt-4o-mini $0.15/$0.60,
+> gemini-flash $0.075/$0.30 por 1M tokens) — disclaimer en el código.
+
+**Plan**
+
+- Token counting + cost estimate por mensaje, mostrado en UI.
+- Filtro: el bot **NO** debe dar consejos de inversión específicos sin
+  disclaimer. System prompt explícito.
+- Audit log: cada mensaje se guarda en `chat_messages` con timestamp,
+  provider, model, tokens_in, tokens_out, latency_ms.
+- Endpoint `GET /chat/usage` para que el user vea cuánto gastó.
+
+**DoD para Sprint 8 completo**
+- 3 providers funcionando (OpenAI + Anthropic + Gemini).
+- User puede chatear sobre su portfolio y obtener respuestas con sus números
+  reales (no genéricas).
+- Provider selector en UI funcional.
+- Cost / token usage visible.
+- Tests: provider mocks, router fallback, rate limit, prompt injection guard.
+
+---
 
 ### Out-of-scope para Sprint 4 (registrar como deuda)
 - **Backup automático del SQLite** — Fly volume es persistente pero único punto de falla. Plan v2: snapshot diario a S3 o a Cloudflare R2.
@@ -792,12 +1171,114 @@ Cuando vos (Codex / Claude / human) terminés una task:
 - **Sprint 6 (future improvements)** [~] avanzado en 2026-05-28:
   - 6.0 (typography pass del portfolio summary) ✅ DONE — hero + satellites + real-return bar.
   - 6.1 (canonical CEDEAR ratios) ✅ DONE — 50+ tickers + chip de source en holding card.
-    - 6.1b (Balanz FX columns read) ⏳ pendiente.
+    - 6.1b (Balanz FX columns read) ✅ parser leyendo CCL/MEP/Oficial del xlsx
+      + schema migration ADD COLUMN purchase_ccl/mep/official. Propagación al
+      cost_basis pendiente como 6.1c.
   - 6.2 (earnings calendar UI) ✅ DONE — banner sticky con countdown + CTA + dismiss persistente.
-    - 6.2b (surprise history grid) ⏳ pendiente, requiere endpoint nuevo.
-    - 6.2c (pre/post-market reaction %) ⏳ pendiente.
+    - 6.2b (surprise history grid) ✅ DONE 2026-05-29 por agent paralelo. Endpoint nuevo
+      `GET /earnings/{ticker}/history?limit=12` con yfinance `earnings_history` + computed
+      next-day-return. Cache 24h doble (adapter + route). UI grid 4×3 con bull/bear tinting
+      en cada quarter, skeleton + empty state, hook a `analyzeTicker`.
+    - 6.2c (pre/post-market reaction %) ✅ incluido en 6.2b — el `next_day_return_pct` cubre
+      el caso AMC. Pre-market lo dejamos para una segunda iteración si lo pedís.
   - 6.3 – 6.10 ⏳ siguen en cola.
-- **48/48 tests pasan** offline en 2.61s.
+- **Sprint 6.5b (opportunity-cost framing + ad-hoc benchmarks + diagnostics)** ✅ DONE
+  2026-05-28: rediseño completo del panel benchmark, endpoint `/portfolio/benchmarks/custom`
+  para benchmarks ad-hoc (cualquier ticker yfinance), endpoint `/portfolio/diagnostics`
+  para inspeccionar precios crudos por posición, transitions.dev install (card-resize +
+  number-pop-in), 35 nuevos acronyms en Learning (ATH/CAGR/FY27/YTD/1Q26/EPS/...).
+- **Sprint 7 (Core engine, calculations, performance)** [ ] NUEVO · TOP PRIORITY 2026-05-28.
+  Los números siguen sin cuadrar para el user — bloquea cualquier feature futuro.
+- **Sprint 8 (AI chatbot multi-provider)** [ ] NUEVO 2026-05-28 — Gemini/OpenAI/Claude con
+  context-aware prompts del portfolio del user, .env-driven config.
+- **48/48 tests pasan** offline en 3.5s.
+
+---
+
+## Snapshot actualizado — 2026-05-29 fin del día (PAUSED AQUÍ)
+
+### Estado real
+
+- **Sprint 7 (Core engine, calculations, performance)** ✅ COMPLETO:
+  - 7.1 diagnostics UI panel ✅
+  - 7.2 real return refactor (`preferred_benchmark_return_pct`) ✅
+  - 7.3 batch yfinance + cache (300→900s TTL, `prefetch_quotes` + `prefetch_universe`) ✅
+  - 7.4 tests matemáticos hard-coded (`tests/test_portfolio_math.py`, 8 tests) ✅
+  - 7.5 frontend code-split (GLOSSARY lazy + defer scripts) ✅
+
+- **Sprint 8 (AI chatbot)** [~] casi cerrado:
+  - 8.1 backend chat layer (3 providers + router + store + 6 endpoints) ✅
+  - 8.2 .env config + provider selection ✅
+  - 8.3 **context-aware prompts con tool-use** ⏳ **NO ARRANCADO**
+  - 8.4 chat UI 🟡 ENTREGADO POR AGENT, **FALTA VERIFICAR**
+  - 8.5 salvaguardas + audit + cost tracking ✅
+
+- **Otros entregados 2026-05-29**:
+  - 6.2b earnings surprise history (endpoint + grid 4×3) ✅
+  - 6.6 sector + region exposure (classification table + stacked bar) ✅
+
+### Last known good test count: 81/81
+
+Medido después del agent 8.1+8.5 (chat backend) e integración 6.2b+6.6.
+**El agent 8.4 (chat UI) entregó cambios pero NO se verificó** porque el user
+pausó la ejecución antes del syntax check + tests + smoke test.
+
+### Sin commitear
+
+Aproximadamente ~5000 líneas en el working tree. Incluye:
+- Sprint 7 completo (backend perf + frontend code-split + diagnostics).
+- Sprint 8.1+8.2+8.5 backend chat layer entero.
+- Sprint 8.4 chat UI (sin verificar).
+- 6.2b/6.6 surprise history + sector exposure.
+- 6.1b Balanz FX parser + schema migration.
+
+### Pre-flight obligatorio al retomar (orden estricto)
+
+**Paso 0** — fotografiar el estado:
+```bash
+cd /Users/lucianoamato/Desktop/Proyectos/market_bot/market_bot
+git status --short
+git diff --stat | tail -15
+```
+
+**Paso 1** — verificar 8.4 (chat UI):
+```bash
+node -e "new Function(require('fs').readFileSync('apps/web/prototype/app.js','utf8'))"
+python3 -m pytest tests/ --tb=short
+```
+Si JS rompe o tests bajan de 81 → fix antes de seguir.
+
+**Paso 2** — bump version stamps:
+- `apps/web/prototype/index.html`: cambiar todos los `?v=20260529-sprint7c` a `?v=20260530-sprint8`.
+- `apps/web/prototype/app.js`: cambiar `MARKET_BOT_UI_BUILD` a `2026-05-30 · sprint-8 · chat`.
+
+**Paso 3** — smoke test del chat UI en browser:
+- Reiniciar backend (`uvicorn services.api.app:app --host 127.0.0.1 --port 8000 --reload`).
+- Hard refresh (Cmd+Shift+R).
+- Switch surface a "Asistente".
+- Sin API key → debería mostrar chip "Sin proveedores configurados".
+- Con API key en `.env` → crear thread, mandar mensaje.
+
+**Paso 4** — Sprint 8.3 (lo único pending de Sprint 8):
+Implementar `build_user_context(user_id)` en `packages/chat/.../store.py` para
+hidratar system prompt con portfolio + perfil. Y opcionalmente sumar `tools.py`
+con 4 tools. Spec completa en sección 8.3 más arriba.
+
+**Paso 5** — commit final del Sprint 8 entero.
+
+### Después de Sprint 8 — orden sugerido
+
+1. **6.1c** — Propagar `purchase_ccl/mep/official` del Balanz xlsx al
+   `_cost_basis`. Quick win ~30 min. El parser ya lee los valores (6.1b ✅);
+   falta hacerlos override del FX que pide `argentinadatos.com`.
+2. **Sprint 4** — Deploy real Vercel + Fly. Necesario para compartir con beta.
+3. **6.3** — Decision audit loop (computar realized return offline).
+4. **6.5** — Paper trading sandbox.
+5. **6.6 polish** — Sector exposure ya está, falta tooltip por bucket explicando qué hay adentro.
+6. **6.7/6.8/6.9/6.10** — Push alerts, multi-currency, ranking backtest, onboarding tour.
+7. **5.5** — Recolectar otras "cosas raras" que el user pueda reportar.
+8. **Audit UI/UX iteración 2** — B2/B3/B4/B8/B10 (redundancia, citrus glow,
+   benchmark cards consolidados, surface tabs density, hover states).
 
 ### Audit UI/UX completado (2026-05-28)
 Documentado en transcripción de chat. Strengths preservadas: identidad
@@ -808,19 +1289,29 @@ abiertos para iteración posterior: redundancia de labels (B2), citrus glow
 oversize (B3), 5 benchmark cards redundantes (B4), surface tabs density (B8),
 hover state genérico en radar cards (B10).
 
-### Next moves sugeridos (orden de prioridad)
-1. **Verificación visual con el user** — refrescar app y validar:
-   - Hero number gigante en el portfolio summary.
-   - Bull/bear coloring funcionando en P&L tiles.
-   - Banner de earnings aparece cuando hay eventos ≤48h.
-   - Chip de "BYMA oficial" / "No verificado" en cada holding card según ratio source.
-2. **Re-import del Balanz con `replace_existing=true`** — recupera las 2 USD positions
-   y aprovecha la tabla canónica nueva para ratios correctos.
-3. **Sprint 6.1b** (leer FX desde el xlsx de Balanz) — completa la corrección de cost basis
-   para fechas viejas donde argentinadatos.com puede no tener data.
-4. **Sprint 6.2b** (surprise history grid) — el card con los últimos 12 Q de beat/miss
-   por ticker. Requiere endpoint `/earnings/{ticker}/history`.
-5. **Audit issues abiertos B2/B3/B4/B8** — iteración de "design polish 2" cuando haya
-   chance de respirar.
-6. **Cerrar Sprint 4** — deploy real Vercel+Fly.
-7. **Sprint 6.3 / 6.5** — decision audit loop + paper trading.
+### Next moves sugeridos (orden de prioridad post-2026-05-28)
+
+**Bloque A — Core correctness (Sprint 7)** ← TOP PRIORITY
+1. **Sprint 7.1** Auditoría de cálculos end-to-end · resolver el mismatch
+   entre cost basis y valor actual reportado. Diagnostics endpoint en UI.
+2. **Sprint 7.4** Tests de matemática con fixtures hard-coded · golden snapshots.
+3. **Sprint 7.2** Real return refactor para respetar `benchmark_preference`.
+
+**Bloque B — Performance (Sprint 7 cont.)**
+4. **Sprint 7.3** Batch yfinance + cache layers + background precompute.
+5. **Sprint 7.5** Frontend code-split + lazy load.
+
+**Bloque C — AI Chatbot (Sprint 8)**
+6. **Sprint 8.1 + 8.2** Backend chat layer + provider abstraction + .env config.
+7. **Sprint 8.3** Context-aware prompts con tool-use.
+8. **Sprint 8.4 + 8.5** UI + observability.
+
+**Bloque D — Closing existing work**
+9. **Sprint 6.1b** Leer FX desde el xlsx de Balanz.
+10. **Sprint 6.2b** Surprise history grid.
+11. **Sprint 4** Deploy real Vercel+Fly.
+
+**Bloque E — Después**
+12. **Sprint 6.3** Decision audit loop.
+13. **Sprint 6.5** Paper trading.
+14. Resto de Sprint 6.

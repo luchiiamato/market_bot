@@ -26,6 +26,7 @@ for _src in (
     _ROOT / "packages" / "identity" / "src",
     _ROOT / "packages" / "portfolio" / "src",
     _ROOT / "packages" / "reference_data" / "src",
+    _ROOT / "packages" / "chat" / "src",
     _ROOT / "services",
 ):
     if str(_src) not in sys.path:
@@ -112,7 +113,7 @@ def api_client(monkeypatch):
     for mod_name in list(sys.modules):
         if mod_name.startswith(("services", "api", "market_identity",
                                   "market_portfolio", "market_reference",
-                                  "market_bot")):
+                                  "market_chat", "market_bot")):
             sys.modules.pop(mod_name, None)
 
     from services.api.app import app  # type: ignore[import-not-found]

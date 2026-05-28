@@ -31,6 +31,13 @@ class BalanzPositionDraft:
     purchase_currency: str
     underlying_ticker: str | None = None
     notes: str = ""
+    # Sprint 6.1b: capture FX of the purchase date directly from the Balanz
+    # extract (columns K/L/M). When available, we use these instead of asking
+    # argentinadatos.com for the FX of an old date (the API doesn't always
+    # have data for older dates → cost_basis_usd silently breaks).
+    purchase_ccl: float | None = None
+    purchase_mep: float | None = None
+    purchase_official: float | None = None
 
 
 @dataclass
@@ -127,6 +134,13 @@ def parse_balanz_extract(workbook_bytes: bytes) -> BalanzParseResult:
             continue
 
         description = _text_value(row.get("Descripcion"))
+        # FX columns K/L/M from Balanz contain the dollar rates as of the
+        # purchase date. Soft-parse: a missing or unparseable cell just stays
+        # None, in which case the service falls back to argentinadatos.com.
+        purchase_ccl = _safe_float_value(row.get("DolarCCL"))
+        purchase_mep = _safe_float_value(row.get("DolarMEP"))
+        purchase_official = _safe_float_value(row.get("DolarOficial"))
+
         positions.append(
             BalanzPositionDraft(
                 row_number=index,
@@ -138,6 +152,9 @@ def parse_balanz_extract(workbook_bytes: bytes) -> BalanzParseResult:
                 purchase_currency=purchase_currency,
                 underlying_ticker=ticker,
                 notes=f"Importado desde Balanz · {description}".strip(),
+                purchase_ccl=purchase_ccl,
+                purchase_mep=purchase_mep,
+                purchase_official=purchase_official,
             )
         )
 
@@ -273,6 +290,21 @@ def _text_value(value: object) -> str:
 
 def _upper_string_value(value: object) -> str:
     return _text_value(value).upper()
+
+
+def _safe_float_value(value: object) -> float | None:
+    """Lenient float parser — returns None on any failure instead of raising.
+
+    Used for the optional FX columns (K/L/M) from Balanz, where a missing or
+    unparseable cell should not abort the row import.
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return _float_value(raw)
+    except ValueError:
+        return None
 
 
 def _float_value(value: object) -> float:

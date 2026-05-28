@@ -17,9 +17,10 @@ ENGINE_SRC = ROOT_DIR / "packages" / "engine" / "src"
 IDENTITY_SRC = ROOT_DIR / "packages" / "identity" / "src"
 PORTFOLIO_SRC = ROOT_DIR / "packages" / "portfolio" / "src"
 REFERENCE_SRC = ROOT_DIR / "packages" / "reference_data" / "src"
+CHAT_SRC = ROOT_DIR / "packages" / "chat" / "src"
 FRONTEND_DIR = ROOT_DIR / "apps" / "web" / "prototype"
 
-for source_dir in (ENGINE_SRC, IDENTITY_SRC, PORTFOLIO_SRC, REFERENCE_SRC):
+for source_dir in (ENGINE_SRC, IDENTITY_SRC, PORTFOLIO_SRC, REFERENCE_SRC, CHAT_SRC):
     if str(source_dir) not in sys.path:
         sys.path.insert(0, str(source_dir))
 
@@ -38,6 +39,7 @@ from market_portfolio import BalanzImportSkip, PortfolioError, PortfolioService,
 from market_reference import (  # noqa: E402
     ArgentinaBenchmarkError,
     ArgentinaBenchmarkService,
+    fetch_earnings_history,
     fetch_news,
     upcoming_earnings,
 )
@@ -50,6 +52,8 @@ from .schemas import (  # noqa: E402
     DecisionRequest,
     DecisionResponse,
     EarningsEventResponse,
+    EarningsHistoryEventResponse,
+    EarningsHistoryResponse,
     HealthResponse,
     InvestorProfileResponse,
     LoginRequest,
@@ -142,6 +146,10 @@ api_logger = configure_logger()
 MARKET_OVERVIEW_CACHE: TTLCache[MarketOverviewResponse] = TTLCache(ttl_seconds=180)
 NEWS_CACHE: TTLCache[list[NewsItemResponse]] = TTLCache(ttl_seconds=300)
 EARNINGS_CACHE: TTLCache[list[EarningsEventResponse]] = TTLCache(ttl_seconds=900)
+# Historical surprise grid is immutable once a quarter is reported and the
+# upstream call is expensive (one yfinance fetch + price history). Cache for 24h
+# in a dedicated bucket so it never collides with the upcoming-events cache.
+EARNINGS_HISTORY_CACHE: TTLCache[EarningsHistoryResponse] = TTLCache(ttl_seconds=24 * 60 * 60)
 
 # Rate limit dependencies — declared once so the same instances are reused.
 REGISTER_RATE_LIMIT = rate_limit(key="auth_register", max_hits=3, window_seconds=60 * 60)
@@ -806,6 +814,42 @@ def earnings_for_ticker(
     return cached
 
 
+@app.get("/earnings/{ticker}/history", response_model=EarningsHistoryResponse)
+def earnings_history_for_ticker(
+    ticker: str,
+    limit: int = Query(default=12, ge=1, le=24),
+) -> EarningsHistoryResponse:
+    """Last ``limit`` reported quarters with EPS surprise and next-day return.
+
+    Public (matches the rest of the earnings surface). Soft-fails: if the
+    upstream data source has nothing (recent IPO, ticker typo, network hiccup)
+    we return ``{"ticker": X, "events": []}`` with HTTP 200 — the UI shows the
+    empty state. Cached 24h per ticker+limit because reported quarters don't
+    change retroactively.
+    """
+    started_at = time.perf_counter()
+    normalized_ticker = ticker.upper()
+    cache_key = ("history", normalized_ticker, limit)
+    cached = EARNINGS_HISTORY_CACHE.get(cache_key)
+    cache_hit = cached is not None
+    if cached is None:
+        try:
+            rows = fetch_earnings_history(normalized_ticker, limit=limit)
+        except Exception:  # pragma: no cover — defensive, adapter already soft-fails
+            rows = []
+        events = [EarningsHistoryEventResponse(**row) for row in rows]
+        cached = EarningsHistoryResponse(ticker=normalized_ticker, events=events)
+        EARNINGS_HISTORY_CACHE.set(cache_key, cached)
+    _log_endpoint_timing(
+        "earnings_history",
+        started_at,
+        ticker=normalized_ticker,
+        limit=limit,
+        cache_hit=cache_hit,
+    )
+    return cached
+
+
 @app.get("/market/overview", response_model=MarketOverviewResponse)
 def market_overview(
     ticker: Optional[str] = Query(default=None, min_length=1, max_length=16),
@@ -1104,3 +1148,185 @@ class PathDateParser:
         from datetime import date
 
         return date.today()
+
+
+# ---------------------------------------------------------------------------
+# Chat (Sprint 8 + 8.5) — multi-provider chat with persistence, rate limit,
+# audit log and cost tracking. Providers and the router are imported lazily
+# so an environment without the SDKs still boots the API (the only effect is
+# ``/chat/providers`` reports ``configured: false`` for every entry).
+# ---------------------------------------------------------------------------
+from market_chat import (  # noqa: E402
+    ChatMessage,
+    ChatMessageRequest,
+    ChatMessageResponse,
+    ChatProviderInfo,
+    ChatRouter,
+    ChatRouterError,
+    ChatThreadCreateRequest,
+    ChatThreadResponse,
+    ChatUsageResponse,
+    SYSTEM_PROMPT_BASELINE,
+    append_message,
+    create_thread,
+    ensure_chat_schema,
+    get_thread,
+    list_messages,
+    list_threads,
+    usage_for_user,
+)
+from market_chat.schemas import ChatSendResponse  # noqa: E402
+
+chat_router = ChatRouter()
+ensure_chat_schema()
+
+CHAT_MESSAGE_RATE_LIMIT = rate_limit(key="chat_message", max_hits=20, window_seconds=60 * 60)
+
+
+@app.get("/chat/providers", response_model=list[ChatProviderInfo])
+def chat_providers() -> list[ChatProviderInfo]:
+    """Public listing of configured providers — never exposes API keys."""
+
+    return [ChatProviderInfo(**entry) for entry in chat_router.available_providers()]
+
+
+@app.post("/chat/threads", response_model=ChatThreadResponse, status_code=status.HTTP_201_CREATED)
+def create_chat_thread(
+    request: ChatThreadCreateRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> ChatThreadResponse:
+    thread = create_thread(
+        user_id=current_user.user_id,
+        title=request.title or "Nueva conversación",
+        provider=request.provider,
+        model=request.model,
+    )
+    return ChatThreadResponse.model_validate(thread, from_attributes=True)
+
+
+@app.get("/chat/threads", response_model=list[ChatThreadResponse])
+def list_chat_threads(
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> list[ChatThreadResponse]:
+    threads = list_threads(current_user.user_id)
+    return [ChatThreadResponse.model_validate(t, from_attributes=True) for t in threads]
+
+
+@app.get("/chat/threads/{thread_id}/messages", response_model=list[ChatMessageResponse])
+def list_chat_messages(
+    thread_id: int,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> list[ChatMessageResponse]:
+    if get_thread(thread_id, current_user.user_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversación no encontrada.",
+        )
+    rows = list_messages(thread_id, current_user.user_id)
+    return [ChatMessageResponse.model_validate(row, from_attributes=True) for row in rows]
+
+
+@app.post(
+    "/chat/threads/{thread_id}/messages",
+    response_model=ChatSendResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(CHAT_MESSAGE_RATE_LIMIT)],
+)
+def post_chat_message(
+    thread_id: int,
+    request: ChatMessageRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> ChatSendResponse:
+    """Send a user message; persist user + assistant turns; return both.
+
+    Flow: persist the user message → ask the router for a provider → call the
+    SDK → persist the assistant reply with usage metadata → return both rows
+    plus a per-message usage block for the UI.
+    """
+
+    thread = get_thread(thread_id, current_user.user_id)
+    if thread is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversación no encontrada.",
+        )
+
+    # Resolve provider: explicit > thread default > router default.
+    try:
+        if request.provider:
+            provider = chat_router.get_provider(request.provider)
+        elif thread.provider:
+            provider = chat_router.get_provider(thread.provider)
+        else:
+            provider = chat_router.default_provider()
+    except ChatRouterError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    chosen_model = request.model or thread.model or provider.default_model
+
+    # Persist the inbound user turn BEFORE calling the provider. If the SDK
+    # call fails the user's message is still in the history, which matches the
+    # mental model of "I said something, the bot didn't answer".
+    user_row = append_message(
+        thread_id=thread_id,
+        role=request.role,
+        content=request.content,
+        provider=None,
+        model=None,
+    )
+
+    # Rebuild conversation history (oldest first) for the provider.
+    history_rows = list_messages(thread_id, current_user.user_id)
+    history = [
+        ChatMessage(role=row.role, content=row.content)
+        for row in history_rows
+        if row.role in {"user", "assistant", "system"}
+    ]
+
+    try:
+        response = provider.chat(
+            messages=history,
+            system=SYSTEM_PROMPT_BASELINE,
+            model=chosen_model,
+        )
+    except Exception as exc:  # noqa: BLE001 — surface SDK / network errors as 502
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"El provider falló: {exc}",
+        ) from exc
+
+    assistant_row = append_message(
+        thread_id=thread_id,
+        role="assistant",
+        content=response.text,
+        provider=response.provider,
+        model=response.model,
+        tokens_in=response.tokens_in,
+        tokens_out=response.tokens_out,
+        cost_usd=response.cost_usd,
+        latency_ms=response.latency_ms,
+    )
+
+    return ChatSendResponse(
+        user_message=ChatMessageResponse.model_validate(user_row, from_attributes=True),
+        assistant_message=ChatMessageResponse.model_validate(assistant_row, from_attributes=True),
+        usage={
+            "tokens_in": response.tokens_in,
+            "tokens_out": response.tokens_out,
+            "cost_usd": response.cost_usd,
+            "latency_ms": response.latency_ms,
+            "provider": response.provider,
+            "model": response.model,
+        },
+    )
+
+
+@app.get("/chat/usage", response_model=ChatUsageResponse)
+def chat_usage(current_user: AuthenticatedUser = Depends(get_current_user)) -> ChatUsageResponse:
+    """Aggregate spend per provider + day/month for the current user."""
+
+    payload = usage_for_user(current_user.user_id)
+    return ChatUsageResponse.model_validate(payload)
