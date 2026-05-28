@@ -15,3 +15,5 @@ venv/
 data/generated/
 data/app/
 newmodel/results/
+market_bot/.env
+.env
