@@ -38,35 +38,16 @@ class PortfolioService:
         cedear_ratio: float | None = None,
         notes: str = "",
     ) -> PositionValuation:
-        normalized_type = instrument_type.strip().lower()
-        if normalized_type not in {"stock", "cedear"}:
-            raise PortfolioError("El tipo de instrumento debe ser stock o cedear.")
-        if quantity <= 0 or purchase_price <= 0:
-            raise PortfolioError("Cantidad y precio de compra deben ser positivos.")
-
-        normalized_symbol = symbol.strip().upper()
-        normalized_currency = purchase_currency.strip().upper()
-        ratio_value = None
-        ratio_source = None
-        byma_symbol = None
-        resolved_underlying = (underlying_ticker or normalized_symbol).strip().upper()
-
-        if normalized_type == "cedear":
-            current_ccl = self.benchmark_service.get_current_exchange_rates().ccl
-            local_price, _ = self._latest_close(build_byma_symbol(normalized_symbol))
-            underlying_price, _ = self._latest_close(resolved_underlying)
-            reference = resolve_cedear_reference(
-                symbol=normalized_symbol,
-                underlying_ticker=resolved_underlying,
-                user_ratio=cedear_ratio,
-                current_ccl=current_ccl,
-                local_price_ars=local_price,
-                underlying_price_usd=underlying_price,
-            )
-            byma_symbol = reference.byma_symbol
-            resolved_underlying = reference.underlying_ticker
-            ratio_value = reference.cedear_ratio
-            ratio_source = reference.ratio_source
+        prepared = self._prepare_position_payload(
+            instrument_type=instrument_type,
+            symbol=symbol,
+            quantity=quantity,
+            purchase_price=purchase_price,
+            purchase_currency=purchase_currency,
+            underlying_ticker=underlying_ticker,
+            cedear_ratio=cedear_ratio,
+            notes=notes,
+        )
 
         now = datetime.utcnow().isoformat()
         with connection() as conn:
@@ -91,22 +72,99 @@ class PortfolioService:
                 """,
                 (
                     user_id,
-                    normalized_type,
-                    normalized_symbol,
-                    resolved_underlying,
-                    byma_symbol,
-                    ratio_value,
-                    ratio_source,
+                    prepared["instrument_type"],
+                    prepared["symbol"],
+                    prepared["underlying_ticker"],
+                    prepared["byma_symbol"],
+                    prepared["cedear_ratio"],
+                    prepared["cedear_ratio_source"],
                     quantity,
                     purchase_date.isoformat(),
                     purchase_price,
-                    normalized_currency,
-                    notes.strip(),
+                    prepared["purchase_currency"],
+                    prepared["notes"],
                     now,
                     now,
                 ),
             )
             position_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+
+        return self.get_position_valuation(
+            position_id,
+            user_id,
+            benchmark_preference,
+            risk_tolerance=risk_tolerance,
+        )
+
+    def update_position(
+        self,
+        position_id: int,
+        user_id: int,
+        instrument_type: str,
+        symbol: str,
+        quantity: float,
+        purchase_date: date,
+        purchase_price: float,
+        purchase_currency: str,
+        benchmark_preference: str,
+        risk_tolerance: str = "medium",
+        underlying_ticker: str | None = None,
+        cedear_ratio: float | None = None,
+        notes: str = "",
+    ) -> PositionValuation:
+        prepared = self._prepare_position_payload(
+            instrument_type=instrument_type,
+            symbol=symbol,
+            quantity=quantity,
+            purchase_price=purchase_price,
+            purchase_currency=purchase_currency,
+            underlying_ticker=underlying_ticker,
+            cedear_ratio=cedear_ratio,
+            notes=notes,
+        )
+
+        now = datetime.utcnow().isoformat()
+        with connection() as conn:
+            existing = conn.execute(
+                "SELECT id FROM positions WHERE id = ? AND user_id = ?",
+                (position_id, user_id),
+            ).fetchone()
+            if existing is None:
+                raise PortfolioError("Posicion no encontrada.")
+            conn.execute(
+                """
+                UPDATE positions
+                SET instrument_type = ?,
+                    symbol = ?,
+                    underlying_ticker = ?,
+                    byma_symbol = ?,
+                    cedear_ratio = ?,
+                    cedear_ratio_source = ?,
+                    quantity = ?,
+                    purchase_date = ?,
+                    purchase_price = ?,
+                    purchase_currency = ?,
+                    notes = ?,
+                    updated_at = ?
+                WHERE id = ? AND user_id = ?
+                """,
+                (
+                    prepared["instrument_type"],
+                    prepared["symbol"],
+                    prepared["underlying_ticker"],
+                    prepared["byma_symbol"],
+                    prepared["cedear_ratio"],
+                    prepared["cedear_ratio_source"],
+                    quantity,
+                    purchase_date.isoformat(),
+                    purchase_price,
+                    prepared["purchase_currency"],
+                    prepared["notes"],
+                    now,
+                    position_id,
+                    user_id,
+                ),
+            )
 
         return self.get_position_valuation(
             position_id,
@@ -458,6 +516,7 @@ class PortfolioService:
             purchase_date=position.purchase_date,
             purchase_price=position.purchase_price,
             purchase_currency=position.purchase_currency,
+            user_notes=position.notes,
             current_price=round(current_price, 2),
             current_price_currency=current_currency,
             quote_as_of=quote_date,
@@ -473,6 +532,58 @@ class PortfolioService:
             benchmark_comparisons=comparisons,
             notes=notes,
         )
+
+    def _prepare_position_payload(
+        self,
+        instrument_type: str,
+        symbol: str,
+        quantity: float,
+        purchase_price: float,
+        purchase_currency: str,
+        underlying_ticker: str | None = None,
+        cedear_ratio: float | None = None,
+        notes: str = "",
+    ) -> dict:
+        normalized_type = instrument_type.strip().lower()
+        if normalized_type not in {"stock", "cedear"}:
+            raise PortfolioError("El tipo de instrumento debe ser stock o cedear.")
+        if quantity <= 0 or purchase_price <= 0:
+            raise PortfolioError("Cantidad y precio de compra deben ser positivos.")
+
+        normalized_symbol = symbol.strip().upper()
+        normalized_currency = purchase_currency.strip().upper()
+        ratio_value = None
+        ratio_source = None
+        byma_symbol = None
+        resolved_underlying = (underlying_ticker or normalized_symbol).strip().upper()
+
+        if normalized_type == "cedear":
+            current_ccl = self.benchmark_service.get_current_exchange_rates().ccl
+            local_price, _ = self._latest_close(build_byma_symbol(normalized_symbol))
+            underlying_price, _ = self._latest_close(resolved_underlying)
+            reference = resolve_cedear_reference(
+                symbol=normalized_symbol,
+                underlying_ticker=resolved_underlying,
+                user_ratio=cedear_ratio,
+                current_ccl=current_ccl,
+                local_price_ars=local_price,
+                underlying_price_usd=underlying_price,
+            )
+            byma_symbol = reference.byma_symbol
+            resolved_underlying = reference.underlying_ticker
+            ratio_value = reference.cedear_ratio
+            ratio_source = reference.ratio_source
+
+        return {
+            "instrument_type": normalized_type,
+            "symbol": normalized_symbol,
+            "purchase_currency": normalized_currency,
+            "underlying_ticker": resolved_underlying,
+            "byma_symbol": byma_symbol,
+            "cedear_ratio": ratio_value,
+            "cedear_ratio_source": ratio_source,
+            "notes": notes.strip(),
+        }
 
     def _cost_basis(self, position: PositionRecord, snapshot, selected_house: str) -> tuple[float, float]:
         notional = position.quantity * position.purchase_price

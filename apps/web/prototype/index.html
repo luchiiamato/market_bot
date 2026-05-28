@@ -59,10 +59,22 @@
               <span class="theme-pill-label">Light</span>
             </button>
           </div>
-          <button type="button" class="account-shortcut" id="account-shortcut" aria-label="Abrir acceso y settings">
-            <span class="account-shortcut-kicker" id="account-shortcut-kicker">Guest</span>
-            <strong class="account-shortcut-label" id="account-shortcut-label">Login</strong>
-          </button>
+          <div class="account-shell" id="account-shell">
+            <button
+              type="button"
+              class="account-shortcut"
+              id="account-shortcut"
+              aria-label="Abrir acceso y settings"
+              aria-haspopup="menu"
+              aria-expanded="false"
+            >
+              <span class="account-shortcut-kicker" id="account-shortcut-kicker">Guest</span>
+              <strong class="account-shortcut-label" id="account-shortcut-label">Login</strong>
+            </button>
+            <div class="account-menu is-hidden" id="account-menu">
+              <div class="account-menu-body" id="account-menu-body"></div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -442,6 +454,14 @@
                     </div>
 
                     <form class="portfolio-form" id="portfolio-form">
+                      <div class="position-editor-shell is-hidden span-2" id="position-editor-shell" aria-live="polite">
+                        <div>
+                          <p class="analysis-kicker">Modo edición</p>
+                          <h4 id="position-editor-title">Editando una posición</h4>
+                        </div>
+                        <button type="button" class="ghost-button" id="position-editor-cancel">Cancelar</button>
+                      </div>
+
                       <div class="mode-group span-2" role="tablist" aria-label="Tipo de instrumento">
                         <button type="button" class="mode-pill is-selected" data-instrument-type="cedear">CEDEAR</button>
                         <button type="button" class="mode-pill" data-instrument-type="stock">Stock</button>

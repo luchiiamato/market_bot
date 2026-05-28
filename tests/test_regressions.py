@@ -20,7 +20,7 @@ from market_bot.contracts import (
     TickerAnalysis,
 )
 from market_bot.service import _apply_rumor_policy
-from market_portfolio.models import BenchmarkComparison, PositionRecord
+from market_portfolio.models import BenchmarkComparison, PositionRecord, PositionValuation
 from market_portfolio.service import PortfolioService
 from market_reference import EarningsEvent, NewsItem
 
@@ -619,3 +619,170 @@ def test_balanz_currency_normalizer_handles_accented_dolares():
     assert _normalize_currency("Pesos") == "ARS"
     assert _normalize_currency("Pesos Argentinos") == "ARS"
     assert _normalize_currency("ARS") == "ARS"
+
+
+def test_update_position_endpoint_returns_updated_position(api_client, auth_headers, monkeypatch):
+    import services.api.app as app_module
+
+    monkeypatch.setattr(
+        app_module.portfolio_service,
+        "update_position",
+        lambda **kwargs: PositionValuation(
+            position_id=kwargs["position_id"],
+            instrument_type=kwargs["instrument_type"],
+            symbol=kwargs["symbol"],
+            underlying_ticker=kwargs["underlying_ticker"] or kwargs["symbol"],
+            byma_symbol="AAPL.BA",
+            cedear_ratio=10.0,
+            cedear_ratio_source="user_supplied",
+            quantity=kwargs["quantity"],
+            purchase_date=kwargs["purchase_date"],
+            purchase_price=kwargs["purchase_price"],
+            purchase_currency=kwargs["purchase_currency"],
+            user_notes=kwargs["notes"],
+            current_price=25000.0,
+            current_price_currency="ARS",
+            quote_as_of=date(2026, 5, 28),
+            current_value_ars=50000.0,
+            current_value_usd=40.0,
+            cost_basis_ars=42000.0,
+            cost_basis_usd=33.0,
+            pnl_ars=8000.0,
+            pnl_usd=7.0,
+            return_pct_ars=0.19,
+            return_pct_usd=0.21,
+            real_return_pct=0.08,
+            benchmark_comparisons=[
+                BenchmarkComparison(
+                    label="inflation",
+                    tracked_value_ars=45000.0,
+                    outperformance_ars=5000.0,
+                    outperformance_pct=0.11,
+                )
+            ],
+            notes=["Earnings en 7 dias."],
+        ),
+    )
+
+    response = api_client.put(
+        "/portfolio/positions/42",
+        headers=auth_headers,
+        json={
+            "instrument_type": "cedear",
+            "symbol": "AAPL",
+            "quantity": 2,
+            "purchase_date": "2026-01-15",
+            "purchase_price": 21000,
+            "purchase_currency": "ARS",
+            "underlying_ticker": "AAPL",
+            "cedear_ratio": 10,
+            "notes": "Lote corregido",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["position_id"] == 42
+    assert payload["user_notes"] == "Lote corregido"
+    assert payload["notes"] == ["Earnings en 7 dias."]
+
+
+def test_news_endpoint_uses_server_side_cache(api_client, monkeypatch):
+    import services.api.app as app_module
+
+    calls = {"count": 0}
+
+    def fake_fetch_news(ticker):
+        calls["count"] += 1
+        return [
+            NewsItem(
+                ticker=ticker,
+                title="Contract win",
+                url="https://example.com/story",
+                source="Reuters",
+                summary="Sample",
+                sentiment=0.3,
+                impact_category="guidance",
+                confidence=0.8,
+                published_at="2026-01-20T00:00:00Z",
+                fetched_at="2026-01-20T00:00:01Z",
+            )
+        ]
+
+    monkeypatch.setattr(app_module, "fetch_news", fake_fetch_news)
+
+    first = api_client.get("/news/AAPL")
+    second = api_client.get("/news/AAPL")
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert calls["count"] == 1
+
+
+def test_ticker_earnings_endpoint_uses_server_side_cache(api_client, monkeypatch):
+    import services.api.app as app_module
+
+    calls = {"count": 0}
+
+    def fake_upcoming_earnings(tickers, days_ahead=180):
+        calls["count"] += 1
+        return [
+            EarningsEvent(
+                ticker=tickers[0],
+                report_date=date(2026, 2, 12),
+                report_time="AMC",
+                eps_estimate=1.23,
+                eps_actual=None,
+                revenue_estimate=None,
+                revenue_actual=None,
+            )
+        ]
+
+    monkeypatch.setattr(app_module, "upcoming_earnings", fake_upcoming_earnings)
+
+    first = api_client.get("/earnings/AAPL?days_ahead=120")
+    second = api_client.get("/earnings/AAPL?days_ahead=120")
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert calls["count"] == 1
+
+
+def test_market_overview_endpoint_uses_server_side_cache(api_client, monkeypatch):
+    import services.api.app as app_module
+
+    calls = {"count": 0}
+
+    def fake_market_overview(ticker, horizon):
+        calls["count"] += 1
+        return {
+            "generated_at": datetime.utcnow(),
+            "ticker": ticker,
+            "horizon": horizon.value,
+            "regime": "risk_on",
+            "breadth": "amplio",
+            "summary": "Tape constructivo.",
+            "warnings": [],
+            "instruments": [
+                {
+                    "symbol": "SPY",
+                    "label": "S&P 500",
+                    "category": "indices",
+                    "price": 500.0,
+                    "day_change_pct": 0.01,
+                    "relative_to_sma20_pct": 0.02,
+                    "relative_to_sma50_pct": 0.03,
+                    "tone": "bull",
+                    "note": "Arriba de medias.",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(app_module, "_build_market_overview", fake_market_overview)
+
+    first = api_client.get("/market/overview?ticker=AAPL&horizon=short")
+    second = api_client.get("/market/overview?ticker=AAPL&horizon=short")
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert calls["count"] == 1

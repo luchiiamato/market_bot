@@ -39,6 +39,10 @@ const API_BASE =
   defaultApiBase;
 
 const AUTH_TOKEN_KEY = "marketBotAccessToken";
+const ANALYSIS_CACHE_TTL_MS = 60_000;
+const RANKINGS_CACHE_TTL_MS = 30_000;
+const analysisBundleCache = new Map();
+const rankingsCache = new Map();
 const GLOSSARY_TERMS = [
   {
     id: "rsi",
@@ -419,7 +423,24 @@ const GLOSSARY_TERMS = [
     label: "FCF",
     category: "Acronym",
     short: "Free Cash Flow — caja libre que genera el negocio.",
-    detail: "Free Cash Flow = operating cash flow − capex. Es la métrica preferida de inversores serios (Buffett-style) porque es plata real, no contable. FCF yield = FCF / market cap."
+    detail: "Free Cash Flow = operating cash flow − capex. Es la métrica preferida de inversores serios (Buffett-style) porque es plata real, no contable. FCF yield = FCF / market cap.",
+    keywords: ["free cash flow", "fcf yield", "cash flow libre", "caja libre"]
+  },
+  {
+    id: "ltm",
+    label: "LTM",
+    category: "Acronym",
+    short: "Last Twelve Months — los últimos 12 meses móviles.",
+    detail: "LTM se usa para mirar revenue, EBITDA, EPS o FCF sin depender del cierre exacto del año fiscal. Cuando ves EV/LTM EBITDA o P/LTM EPS, están annualizando con la ventana más reciente.",
+    keywords: ["last twelve months", "ttm", "trailing twelve months", "ultimos 12 meses"]
+  },
+  {
+    id: "roic",
+    label: "ROIC",
+    category: "Acronym",
+    short: "Return on Invested Capital — retorno sobre el capital invertido.",
+    detail: "ROIC mide cuánta ganancia operativa genera la empresa por cada dólar realmente invertido en el negocio. Suele usarse para detectar negocios de calidad: ROIC alto y sostenible suele apuntar a ventaja competitiva real.",
+    keywords: ["return on invested capital", "retorno sobre capital invertido", "quality compounder"]
   },
   {
     id: "tam",
@@ -589,6 +610,7 @@ const state = {
   horizon: "short",
   radarItems: [],
   universe: [],
+  learningReady: false,
   learningFilter: "all",
   learningQuery: "",
   authMode: "login",
@@ -600,16 +622,25 @@ const state = {
   portfolioView: "summary",
   activeSurface: "workspace",
   lastTabbedSurface: "workspace",
+  accountMenuOpen: false,
+  editingPositionId: null,
+  hasAnalyzed: false,
   analysisRequestId: 0,
   rankingMode: window.localStorage.getItem("marketBotRankingMode") || "default",
   currentFx: null
 };
 
+let isApplyingRoute = false;
+let analysisAbortController = null;
+
 const elements = {
   body: document.body,
+  accountShell: document.querySelector("#account-shell"),
   accountShortcut: document.querySelector("#account-shortcut"),
   accountShortcutKicker: document.querySelector("#account-shortcut-kicker"),
   accountShortcutLabel: document.querySelector("#account-shortcut-label"),
+  accountMenu: document.querySelector("#account-menu"),
+  accountMenuBody: document.querySelector("#account-menu-body"),
   accountCardTitle: document.querySelector("#account-card-title"),
   accountCardChip: document.querySelector("#account-card-chip"),
   accountCardCopy: document.querySelector("#account-card-copy"),
@@ -696,6 +727,9 @@ const elements = {
   portfolioImportReplace: document.querySelector("#portfolio-import-replace"),
   portfolioImportStatus: document.querySelector("#portfolio-import-status"),
   portfolioForm: document.querySelector("#portfolio-form"),
+  positionEditorShell: document.querySelector("#position-editor-shell"),
+  positionEditorTitle: document.querySelector("#position-editor-title"),
+  positionEditorCancel: document.querySelector("#position-editor-cancel"),
   instrumentButtons: Array.from(document.querySelectorAll("[data-instrument-type]")),
   positionSymbol: document.querySelector("#position-symbol"),
   positionQuantity: document.querySelector("#position-quantity"),
@@ -749,29 +783,104 @@ function setPortfolioImportStatus(message) {
   elements.portfolioImportStatus.textContent = message;
 }
 
+function readTimedCache(cache, key, ttlMs) {
+  const cached = cache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.storedAt > ttlMs) {
+    cache.delete(key);
+    return null;
+  }
+  return cached.value;
+}
+
+function writeTimedCache(cache, key, value) {
+  cache.set(key, { value, storedAt: Date.now() });
+  return value;
+}
+
+function rankingsCacheKey() {
+  const profileKey = state.profile
+    ? `${state.profile.username}|${state.profile.risk_tolerance}|${state.profile.benchmark_preference}`
+    : "guest";
+  return `${state.horizon}|${state.rankingMode}|${profileKey}`;
+}
+
+function analysisCacheKey(ticker = state.ticker, horizon = state.horizon) {
+  return `${String(ticker || "").toUpperCase()}|${horizon}`;
+}
+
+function setAccountMenuOpen(isOpen) {
+  const loggedIn = Boolean(state.profile && state.accessToken);
+  state.accountMenuOpen = loggedIn ? Boolean(isOpen) : false;
+  if (!elements.accountMenu || !elements.accountShortcut) return;
+  elements.accountMenu.classList.toggle("is-hidden", !state.accountMenuOpen);
+  elements.accountShortcut.setAttribute("aria-expanded", state.accountMenuOpen ? "true" : "false");
+}
+
+function renderAccountMenu() {
+  if (!elements.accountMenuBody) return;
+  const loggedIn = Boolean(state.profile && state.accessToken);
+  if (!loggedIn) {
+    elements.accountMenuBody.innerHTML = "";
+    setAccountMenuOpen(false);
+    return;
+  }
+
+  const displayName = state.profile.display_name || state.profile.username;
+  elements.accountMenuBody.innerHTML = `
+    <div class="account-menu-head">
+      <p class="sidebar-kicker">Sesión activa</p>
+      <strong>${escapeText(displayName)}</strong>
+      <p class="account-menu-copy">@${escapeText(state.profile.username)} · ${escapeText(toHeadline(state.profile.investor_profile))} · Riesgo ${escapeText(state.profile.risk_tolerance.toUpperCase())}</p>
+    </div>
+    <div class="account-menu-actions" role="menu" aria-label="Acciones de cuenta">
+      <button type="button" class="account-menu-action" data-account-action="portfolio" role="menuitem">
+        <strong>Portfolio</strong>
+        <span>Ir a posiciones, benchmarks e import Balanz.</span>
+      </button>
+      <button type="button" class="account-menu-action" data-account-action="settings" role="menuitem">
+        <strong>Settings</strong>
+        <span>Abrir perfil inversor, horizonte y benchmark FX.</span>
+      </button>
+      <button type="button" class="account-menu-action" data-account-action="howto" role="menuitem">
+        <strong>How to use</strong>
+        <span>Repasar el playbook sin salir de la app.</span>
+      </button>
+      <button type="button" class="account-menu-action is-danger" data-account-action="logout" role="menuitem">
+        <strong>Salir</strong>
+        <span>Cerrar sesión en este browser.</span>
+      </button>
+    </div>
+  `;
+}
+
 function renderAccountChrome() {
   const loggedIn = Boolean(state.profile && state.accessToken);
   if (!loggedIn) {
     elements.accountShortcutKicker.textContent = "Guest";
     elements.accountShortcutLabel.textContent = "Login";
+    elements.accountShortcut.setAttribute("aria-label", "Abrir login o registro");
     elements.accountCardTitle.textContent = "Entrá o registrate";
     elements.accountCardChip.textContent = "Guest";
     elements.accountCardCopy.textContent = "El acceso vive aparte del landing. Primero creás tu usuario local y recién ahí se habilita portfolio, benchmarks y positions tracking.";
     elements.openAccountButton.querySelector(".button-label").textContent = "Ir a login";
     elements.openPortfolioButton.textContent = "Crear cuenta";
     elements.openPortfolioButton.setAttribute("aria-label", "Crear cuenta");
+    renderAccountMenu();
     return;
   }
 
   const displayName = state.profile.display_name || state.profile.username;
   elements.accountShortcutKicker.textContent = "Settings";
   elements.accountShortcutLabel.textContent = `@${state.profile.username}`;
+  elements.accountShortcut.setAttribute("aria-label", "Abrir menú de usuario");
   elements.accountCardTitle.textContent = displayName;
   elements.accountCardChip.textContent = state.profile.risk_tolerance.toUpperCase();
   elements.accountCardCopy.textContent = `${toHeadline(state.profile.investor_profile)} · ${toHeadline(state.profile.preferred_horizon)} · Benchmark ${state.profile.benchmark_preference.toUpperCase()}`;
   elements.openAccountButton.querySelector(".button-label").textContent = "Abrir settings";
   elements.openPortfolioButton.textContent = "Ir al portfolio";
   elements.openPortfolioButton.setAttribute("aria-label", "Ir al portfolio");
+  renderAccountMenu();
 }
 
 function renderContextPlaceholder(target, options) {
@@ -818,10 +927,84 @@ function accessFocusTarget() {
 
 const SURFACE_ORDER = ["workspace", "portfolio", "howto", "learning", "trading", "access"];
 
-function setSurface(surface) {
+function normalizedHashRoute(hash) {
+  const route = String(hash || "")
+    .replace(/^#\/?/, "")
+    .trim()
+    .toLowerCase();
+  return route || "workspace";
+}
+
+function parseHashRoute(hash) {
+  const route = normalizedHashRoute(hash);
+  if (route === "login") {
+    return { surface: "access", authMode: "login" };
+  }
+  if (route === "register") {
+    return { surface: "access", authMode: "register" };
+  }
+  if (route === "settings") {
+    return { surface: "access", authMode: "login" };
+  }
+  if (SURFACE_ORDER.includes(route)) {
+    return { surface: route };
+  }
+  return { surface: "workspace" };
+}
+
+function currentRouteHash() {
+  if (state.activeSurface === "access") {
+    if (state.profile && state.accessToken) {
+      return "#settings";
+    }
+    return state.authMode === "register" ? "#register" : "#login";
+  }
+  return `#${state.activeSurface || "workspace"}`;
+}
+
+function syncRouteHash(options = {}) {
+  if (isApplyingRoute || typeof window === "undefined") return;
+  const { replace = false } = options;
+  const nextHash = currentRouteHash();
+  const baseUrl = `${window.location.pathname}${window.location.search}`;
+  const nextUrl = `${baseUrl}${nextHash}`;
+  const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash || ""}`;
+  if (currentUrl === nextUrl) return;
+  if (replace) {
+    window.history.replaceState({}, "", nextUrl);
+    return;
+  }
+  window.history.pushState({}, "", nextUrl);
+}
+
+function openAccess(mode, options = {}) {
+  if (!(state.profile && state.accessToken) && mode) {
+    setAuthMode(mode, { syncRoute: false });
+  }
+  setSurface("access", options);
+}
+
+function applyHashRoute(options = {}) {
+  const { replace = false } = options;
+  const route = parseHashRoute(window.location.hash);
+  isApplyingRoute = true;
+  try {
+    if (!(state.profile && state.accessToken) && route.authMode) {
+      setAuthMode(route.authMode, { syncRoute: false });
+    }
+    setSurface(route.surface, { syncRoute: false });
+  } finally {
+    isApplyingRoute = false;
+  }
+  syncRouteHash({ replace: true });
+}
+
+function setSurface(surface, options = {}) {
+  const { syncRoute = true, replaceRoute = false } = options;
+  setAccountMenuOpen(false);
   if (surface === "portfolio" && !(state.profile && state.accessToken)) {
     surface = "access";
-    setAuthMode("login");
+    setAuthMode("login", { syncRoute: false });
   }
   const previousSurface = state.activeSurface;
   state.activeSurface = surface;
@@ -871,6 +1054,9 @@ function setSurface(surface) {
     elements.closeAccountButton.textContent = `Volver a ${surfaceLabel(state.lastTabbedSurface)}`;
   }
   elements.body.dataset.overlay = surface === "access" ? "access" : "none";
+  if (activeBaseSurface === "learning") {
+    ensureLearningReady();
+  }
   if (surface === "access") {
     window.requestAnimationFrame(() => {
       const focusTarget = accessFocusTarget();
@@ -878,6 +1064,9 @@ function setSurface(surface) {
         focusTarget.focus();
       }
     });
+  }
+  if (syncRoute) {
+    syncRouteHash({ replace: replaceRoute });
   }
 }
 
@@ -1059,11 +1248,13 @@ function renderGlossary() {
 
 function setLearningFilter(filter) {
   state.learningFilter = filter;
+  ensureLearningReady();
   renderGlossary();
 }
 
 function setLearningQuery(query) {
   state.learningQuery = String(query || "");
+  ensureLearningReady();
   renderGlossary();
 }
 
@@ -1139,7 +1330,8 @@ function clearSession() {
   window.localStorage.removeItem(AUTH_TOKEN_KEY);
 }
 
-function setAuthMode(mode) {
+function setAuthMode(mode, options = {}) {
+  const { syncRoute = true, replaceRoute = false } = options;
   state.authMode = mode;
   const isRegister = mode === "register";
   elements.authTitle.textContent = isRegister
@@ -1156,6 +1348,9 @@ function setAuthMode(mode) {
   const label = elements.authSubmit.querySelector(".button-label");
   if (label) {
     label.textContent = elements.authSubmit.dataset.defaultLabel;
+  }
+  if (syncRoute && state.activeSurface === "access" && !(state.profile && state.accessToken)) {
+    syncRouteHash({ replace: replaceRoute });
   }
 }
 
@@ -1182,9 +1377,17 @@ function setMiniSummaryCurrency(currency) {
   renderMiniSummary(state.portfolioSummary);
 }
 
+function ensureLearningReady() {
+  if (state.learningReady) return;
+  renderGlossary();
+  state.learningReady = true;
+}
+
 function renderUnauthenticated() {
   updatePortfolioAccessState();
   elements.body.dataset.loggedIn = "false";
+  clearPositionEditor();
+  resetPortfolioForm();
   elements.authForm.classList.remove("is-hidden");
   elements.profileShell.classList.add("is-hidden");
   elements.portfolioLockedState.classList.remove("is-hidden");
@@ -1229,6 +1432,7 @@ function hydrateProfile(profile) {
 function renderAuthenticated() {
   updatePortfolioAccessState();
   elements.body.dataset.loggedIn = "true";
+  clearPositionEditor();
   elements.authForm.classList.add("is-hidden");
   elements.profileShell.classList.remove("is-hidden");
   elements.portfolioLockedState.classList.add("is-hidden");
@@ -1275,6 +1479,7 @@ function renderMiniSummary(summary) {
 }
 
 function renderWorkspaceIdle() {
+  state.hasAnalyzed = false;
   elements.workspaceTitle.textContent = `Ticker seleccionado: ${state.ticker}`;
   elements.marketChip.textContent = `${titleCaseHorizon(state.horizon)} · Radar listo`;
   elements.verdictGrid.innerHTML = `
@@ -1453,6 +1658,60 @@ function setInstrumentType(type) {
   elements.positionPurchaseCurrency.value = currency;
 }
 
+function resetPortfolioForm() {
+  elements.portfolioForm.reset();
+  setInstrumentType("cedear");
+}
+
+function clearPositionEditor() {
+  state.editingPositionId = null;
+  if (elements.positionEditorShell) {
+    elements.positionEditorShell.classList.add("is-hidden");
+  }
+  if (elements.positionEditorTitle) {
+    elements.positionEditorTitle.textContent = "Editando una posición";
+  }
+  const submitLabel = elements.portfolioForm.querySelector(".button-label");
+  if (submitLabel) {
+    submitLabel.textContent = "Agregar posición";
+  }
+}
+
+function beginPositionEdit(positionId) {
+  if (!state.portfolioSummary || !Array.isArray(state.portfolioSummary.positions)) return;
+  const position = state.portfolioSummary.positions.find((item) => String(item.position_id) === String(positionId));
+  if (!position) return;
+
+  state.editingPositionId = Number(position.position_id);
+  setPortfolioView("load");
+  setSurface("portfolio");
+  if (elements.positionEditorShell) {
+    elements.positionEditorShell.classList.remove("is-hidden");
+  }
+  if (elements.positionEditorTitle) {
+    elements.positionEditorTitle.textContent = `${position.symbol} · ${toHeadline(position.instrument_type)}`;
+  }
+  const submitLabel = elements.portfolioForm.querySelector(".button-label");
+  if (submitLabel) {
+    submitLabel.textContent = "Guardar cambios";
+  }
+
+  setInstrumentType(position.instrument_type);
+  elements.positionSymbol.value = position.symbol || "";
+  elements.positionQuantity.value = position.quantity ?? "";
+  elements.positionPurchaseDate.value = position.purchase_date || "";
+  elements.positionPurchasePrice.value = position.purchase_price ?? "";
+  elements.positionPurchaseCurrency.value = position.purchase_currency || (position.instrument_type === "cedear" ? "ARS" : "USD");
+  elements.positionUnderlying.value = position.underlying_ticker || "";
+  elements.positionRatio.value = position.cedear_ratio ?? "";
+  elements.positionNotes.value = position.user_notes || "";
+  setPortfolioStatus(`Editando ${position.symbol}. Guardá cambios o cancelá.`);
+  window.requestAnimationFrame(() => {
+    elements.positionSymbol.focus();
+    elements.portfolioForm.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  });
+}
+
 async function loadPortfolioSummary() {
   if (!state.accessToken) {
     return;
@@ -1593,18 +1852,25 @@ function renderPortfolioSummary(summary) {
       const noteList = position.notes.length
         ? `<ul class="warning-list compact-list">${position.notes.map((note) => `<li>${escapeText(note)}</li>`).join("")}</ul>`
         : "";
+      const userNotesBlock = position.user_notes
+        ? `<p class="panel-caption">${escapeText(position.user_notes)}</p>`
+        : "";
       return `
-        <article class="holding-card">
+        <article class="holding-card ${state.editingPositionId === position.position_id ? "is-editing" : ""}">
           <div class="holding-head">
             <div>
               <p class="analysis-kicker">${toHeadline(position.instrument_type)}</p>
               <h3>${escapeText(position.symbol)}</h3>
               <p class="panel-caption">${escapeText(position.underlying_ticker)} · Compra ${escapeText(position.purchase_date)}</p>
               ${effectiveSharesLine}
+              ${userNotesBlock}
             </div>
             <div class="holding-actions">
               ${ratioLine}
-              <button type="button" class="ghost-button" data-delete-position="${position.position_id}">Eliminar</button>
+              <div class="holding-actions-row">
+                <button type="button" class="ghost-button" data-edit-position="${position.position_id}">Editar</button>
+                <button type="button" class="ghost-button" data-delete-position="${position.position_id}">Eliminar</button>
+              </div>
             </div>
           </div>
 
@@ -2203,29 +2469,32 @@ function renderComparisonChip(label, comparison) {
 async function handlePortfolioSubmit(event) {
   event.preventDefault();
   const submitButton = elements.portfolioForm.querySelector(".primary-button");
-  setButtonBusy(submitButton, true, "Guardando...");
+  const isEditing = Number.isInteger(state.editingPositionId);
+  setButtonBusy(submitButton, true, isEditing ? "Guardando..." : "Guardando...");
   try {
-    await fetchJson("/portfolio/positions", {
+    const payload = {
+      instrument_type: state.instrumentType,
+      symbol: elements.positionSymbol.value.trim().toUpperCase(),
+      quantity: Number(elements.positionQuantity.value),
+      purchase_date: elements.positionPurchaseDate.value,
+      purchase_price: Number(elements.positionPurchasePrice.value),
+      purchase_currency: elements.positionPurchaseCurrency.value,
+      underlying_ticker: elements.positionUnderlying.value.trim().toUpperCase() || null,
+      cedear_ratio: elements.positionRatio.value ? Number(elements.positionRatio.value) : null,
+      notes: elements.positionNotes.value.trim()
+    };
+
+    await fetchJson(isEditing ? `/portfolio/positions/${state.editingPositionId}` : "/portfolio/positions", {
       auth: true,
-      method: "POST",
-      body: JSON.stringify({
-        instrument_type: state.instrumentType,
-        symbol: elements.positionSymbol.value.trim().toUpperCase(),
-        quantity: Number(elements.positionQuantity.value),
-        purchase_date: elements.positionPurchaseDate.value,
-        purchase_price: Number(elements.positionPurchasePrice.value),
-        purchase_currency: elements.positionPurchaseCurrency.value,
-        underlying_ticker: elements.positionUnderlying.value.trim().toUpperCase() || null,
-        cedear_ratio: elements.positionRatio.value ? Number(elements.positionRatio.value) : null,
-        notes: elements.positionNotes.value.trim()
-      })
+      method: isEditing ? "PUT" : "POST",
+      body: JSON.stringify(payload)
     });
-    elements.portfolioForm.reset();
-    setInstrumentType("cedear");
+    resetPortfolioForm();
+    clearPositionEditor();
     await loadPortfolioSummary();
-    setPortfolioView("summary");
+    setPortfolioView(isEditing ? "holdings" : "summary");
     setSurface("portfolio");
-    setPortfolioStatus("Posición guardada.");
+    setPortfolioStatus(isEditing ? "Posición actualizada." : "Posición guardada.");
   } catch (error) {
     setPortfolioStatus(`No se pudo guardar la posición: ${error.message}`);
   } finally {
@@ -2298,6 +2567,10 @@ async function handleDeletePosition(positionId) {
       auth: true,
       method: "DELETE"
     });
+    if (Number(state.editingPositionId) === Number(positionId)) {
+      resetPortfolioForm();
+      clearPositionEditor();
+    }
     await loadPortfolioSummary();
     setPortfolioStatus("Posición eliminada.");
   } catch (error) {
@@ -2316,9 +2589,14 @@ async function loadUniverse() {
 async function loadRankings() {
   const mode = state.rankingMode === "opportunities" ? "opportunities" : "default";
   const url = `/rankings?horizon=${state.horizon}&limit=6&cedear_only=true&mode=${mode}`;
-  const rankings = await fetchJson(url, {
+  const cacheKey = rankingsCacheKey();
+  const cachedRankings = readTimedCache(rankingsCache, cacheKey, RANKINGS_CACHE_TTL_MS);
+  const rankings = cachedRankings || await fetchJson(url, {
     auth: Boolean(state.accessToken)
   });
+  if (!cachedRankings) {
+    writeTimedCache(rankingsCache, cacheKey, rankings);
+  }
   state.radarItems = rankings;
   renderRadar();
 
@@ -2476,18 +2754,57 @@ async function analyzeTicker(nextTicker = state.ticker) {
   primeContextLoading(ticker);
   setStatus(`Corriendo análisis real para ${ticker} en ${state.horizon}...`);
 
+  const cachedBundle = readTimedCache(
+    analysisBundleCache,
+    analysisCacheKey(ticker, state.horizon),
+    ANALYSIS_CACHE_TTL_MS
+  );
+  if (cachedBundle) {
+    renderAnalysis(cachedBundle.analysis);
+    if (cachedBundle.market) {
+      renderMarketOverview(cachedBundle.market);
+    } else {
+      renderMarketOverviewError("No se pudo leer el tape general.");
+    }
+    if (cachedBundle.news) {
+      renderNewsFeed(cachedBundle.news);
+    } else {
+      renderNewsError("No se pudo consultar el feed.");
+    }
+    if (cachedBundle.earnings) {
+      renderTickerEarningsFeed(ticker, cachedBundle.earnings);
+    } else {
+      renderTickerEarningsError("No se pudo consultar el calendario.");
+    }
+    setLoading(false);
+    setStatus(`Análisis listo para ${ticker}. Resultado servido desde cache local.`);
+    return;
+  }
+
+  if (analysisAbortController) {
+    analysisAbortController.abort();
+  }
+  analysisAbortController = new AbortController();
+
   try {
     const [analysisResult, marketResult, newsResult, earningsResult] = await Promise.allSettled([
       fetchJson("/analyze", {
         method: "POST",
+        signal: analysisAbortController.signal,
         body: JSON.stringify({
           ticker,
           horizon: state.horizon
         })
       }),
-      fetchJson(`/market/overview?ticker=${encodeURIComponent(ticker)}&horizon=${encodeURIComponent(state.horizon)}`),
-      fetchJson(`/news/${ticker}?limit=6`),
-      fetchJson(`/earnings/${ticker}?days_ahead=180`)
+      fetchJson(`/market/overview?ticker=${encodeURIComponent(ticker)}&horizon=${encodeURIComponent(state.horizon)}`, {
+        signal: analysisAbortController.signal
+      }),
+      fetchJson(`/news/${ticker}?limit=6`, {
+        signal: analysisAbortController.signal
+      }),
+      fetchJson(`/earnings/${ticker}?days_ahead=180`, {
+        signal: analysisAbortController.signal
+      })
     ]);
     if (requestId !== state.analysisRequestId) return;
     if (analysisResult.status !== "fulfilled") {
@@ -2514,15 +2831,29 @@ async function analyzeTicker(nextTicker = state.ticker) {
     const cedearMessage = state.universe.includes(ticker)
       ? "Ticker con CEDEAR disponible."
       : "Ticker fuera del universo CEDEAR sugerido. Se analiza igual, pero no se usará en rankings.";
+    writeTimedCache(analysisBundleCache, analysisCacheKey(ticker, state.horizon), {
+      analysis,
+      market: marketResult.status === "fulfilled" ? marketResult.value : null,
+      news: newsResult.status === "fulfilled" ? newsResult.value : null,
+      earnings: earningsResult.status === "fulfilled" ? earningsResult.value : null
+    });
     setStatus(`Análisis listo para ${ticker}. ${cedearMessage}`);
   } catch (error) {
     if (requestId !== state.analysisRequestId) return;
+    if (error?.name === "AbortError") {
+      return;
+    }
     renderErrorState(ticker, error);
     renderMarketOverviewError(error.message);
     renderNewsError(error.message);
     renderTickerEarningsError(error.message);
     setStatus(`No se pudo analizar ${ticker}: ${error.message}`);
   } finally {
+    if (analysisAbortController?.signal?.aborted) {
+      analysisAbortController = null;
+    } else {
+      analysisAbortController = null;
+    }
     if (requestId === state.analysisRequestId) {
       setLoading(false);
     }
@@ -2530,6 +2861,7 @@ async function analyzeTicker(nextTicker = state.ticker) {
 }
 
 function renderAnalysis(analysis) {
+  state.hasAnalyzed = true;
   elements.workspaceTitle.textContent = `Ticker seleccionado: ${analysis.ticker}`;
   elements.marketChip.textContent = `${titleCaseHorizon(analysis.horizon)} · ${state.universe.includes(analysis.ticker) ? "CEDEAR" : "No CEDEAR"}`;
   elements.tickerInput.value = analysis.ticker;
@@ -3095,27 +3427,60 @@ elements.surfaceButtons.forEach((button) => {
   button.addEventListener("click", () => setSurface(button.dataset.surface));
 });
 
-elements.accountShortcut.addEventListener("click", () => setSurface("access"));
-elements.openAccountButton.addEventListener("click", () => setSurface("access"));
+elements.accountShortcut.addEventListener("click", () => {
+  if (state.profile && state.accessToken) {
+    setAccountMenuOpen(!state.accountMenuOpen);
+    return;
+  }
+  openAccess("login");
+});
+elements.openAccountButton.addEventListener("click", () => openAccess("login"));
 elements.openPortfolioButton.addEventListener("click", () => {
   if (state.profile && state.accessToken) {
     setSurface("portfolio");
     return;
   }
-  setAuthMode("register");
-  setSurface("access");
+  openAccess("register");
 });
 elements.closeAccountButton.addEventListener("click", () => setSurface(state.lastTabbedSurface || "workspace"));
 elements.accessSurface.addEventListener("click", (event) => {
   if (event.target !== elements.accessSurface) return;
   setSurface(state.lastTabbedSurface || "workspace");
 });
+if (elements.accountMenuBody) {
+  elements.accountMenuBody.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-account-action]")?.dataset.accountAction;
+    if (!action) return;
+    if (action === "portfolio") {
+      setSurface("portfolio");
+      return;
+    }
+    if (action === "settings") {
+      openAccess("login");
+      return;
+    }
+    if (action === "howto") {
+      setSurface("howto");
+      return;
+    }
+    if (action === "logout") {
+      handleLogout();
+    }
+  });
+}
 
 elements.authForm.addEventListener("submit", handleAuthSubmit);
 elements.profileForm.addEventListener("submit", handleProfileSubmit);
 elements.logoutButton.addEventListener("click", handleLogout);
 elements.portfolioImportForm.addEventListener("submit", handlePortfolioImportSubmit);
 elements.portfolioForm.addEventListener("submit", handlePortfolioSubmit);
+if (elements.positionEditorCancel) {
+  elements.positionEditorCancel.addEventListener("click", () => {
+    resetPortfolioForm();
+    clearPositionEditor();
+    setPortfolioStatus("Edición cancelada.");
+  });
+}
 
 elements.portfolioViewButtons.forEach((button) => {
   button.addEventListener("click", () => setPortfolioView(button.dataset.portfolioViewTab));
@@ -3164,7 +3529,12 @@ elements.horizonButtons.forEach((button) => {
     setLoading(true);
     try {
       await loadRankings();
-      await analyzeTicker(state.ticker);
+      if (state.hasAnalyzed) {
+        await analyzeTicker(state.ticker);
+      } else {
+        renderWorkspaceIdle();
+        setStatus("Horizonte actualizado. Elegí un ticker o una card para correr el análisis.");
+      }
     } finally {
       setLoading(false);
     }
@@ -3193,6 +3563,11 @@ elements.learningSearchClear.addEventListener("click", () => {
 });
 
 elements.holdingsGrid.addEventListener("click", (event) => {
+  const editButton = event.target.closest("[data-edit-position]");
+  if (editButton) {
+    beginPositionEdit(editButton.dataset.editPosition);
+    return;
+  }
   const button = event.target.closest("[data-delete-position]");
   if (!button) return;
   handleDeletePosition(button.dataset.deletePosition);
@@ -3200,18 +3575,32 @@ elements.holdingsGrid.addEventListener("click", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if (state.accountMenuOpen) {
+    setAccountMenuOpen(false);
+    return;
+  }
   if (state.activeSurface !== "access") return;
   setSurface(state.lastTabbedSurface || "workspace");
 });
 
+document.addEventListener("click", (event) => {
+  if (!state.accountMenuOpen) return;
+  if (elements.accountShell && elements.accountShell.contains(event.target)) return;
+  setAccountMenuOpen(false);
+});
+
+window.addEventListener("popstate", () => {
+  applyHashRoute();
+});
+
 async function bootstrap() {
-  setAuthMode("login");
+  const initialRoute = parseHashRoute(window.location.hash);
+  setAuthMode(initialRoute.authMode || "login", { syncRoute: false });
   setInstrumentType("cedear");
   setMiniSummaryCurrency("ARS");
   setPortfolioView("summary");
-  setSurface("workspace");
+  setSurface(initialRoute.surface || "workspace", { syncRoute: false });
   updatePortfolioAccessState();
-  renderGlossary();
   renderUnauthenticated();
   setLoading(true);
   setStatus(`Conectando con el API en ${API_BASE}...`);
@@ -3223,6 +3612,7 @@ async function bootstrap() {
       loadRankings(),
       bootstrapSession({ refreshRankings: false })
     ]);
+    applyHashRoute({ replace: true });
     renderWorkspaceIdle();
     setStatus("Elegí un ticker o tocá una card del radar para correr el análisis.");
   } catch (error) {

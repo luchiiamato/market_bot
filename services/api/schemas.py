@@ -50,6 +50,10 @@ class CreatePositionRequest(BaseModel):
     notes: str = Field(default="", max_length=500)
 
 
+class UpdatePositionRequest(CreatePositionRequest):
+    pass
+
+
 class ScenarioProbabilityResponse(BaseModel):
     label: str
     probability: float
@@ -214,6 +218,7 @@ class PositionValuationResponse(BaseModel):
     purchase_date: date
     purchase_price: float
     purchase_currency: str
+    user_notes: str = ""
     current_price: float
     current_price_currency: str
     quote_as_of: date

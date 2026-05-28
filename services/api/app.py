@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -25,6 +26,7 @@ for source_dir in (ENGINE_SRC, IDENTITY_SRC, PORTFOLIO_SRC, REFERENCE_SRC):
 from market_bot import Horizon, MarketBotService, ProfileFilter  # noqa: E402
 from market_bot.config import is_cedear_ticker  # noqa: E402
 from market_bot.data import MarketDataError  # noqa: E402
+from market_bot.utils import TTLCache  # noqa: E402
 from market_identity import (  # noqa: E402
     AuthenticatedUser,
     IdentityService,
@@ -63,6 +65,7 @@ from .schemas import (  # noqa: E402
     ReliabilityBinResponse,
     SessionResponse,
     TickerAnalysisResponse,
+    UpdatePositionRequest,
     UniverseItemResponse,
     ValidationReportResponse,
 )
@@ -135,6 +138,11 @@ configure_logger().info(
     },
 )
 
+api_logger = configure_logger()
+MARKET_OVERVIEW_CACHE: TTLCache[MarketOverviewResponse] = TTLCache(ttl_seconds=180)
+NEWS_CACHE: TTLCache[list[NewsItemResponse]] = TTLCache(ttl_seconds=300)
+EARNINGS_CACHE: TTLCache[list[EarningsEventResponse]] = TTLCache(ttl_seconds=900)
+
 # Rate limit dependencies — declared once so the same instances are reused.
 REGISTER_RATE_LIMIT = rate_limit(key="auth_register", max_hits=3, window_seconds=60 * 60)
 ANALYZE_RATE_LIMIT = rate_limit(key="analyze", max_hits=30, window_seconds=60)
@@ -174,6 +182,51 @@ def get_optional_user(authorization: Optional[str] = Header(default=None, alias=
         return identity_service.authenticate(token)
     except (HTTPException, IdentityError):
         return None
+
+
+def _log_endpoint_timing(name: str, started_at: float, **extra) -> None:
+    api_logger.info(
+        "endpoint_timing",
+        extra={
+            "endpoint": name,
+            "latency_ms": int((time.perf_counter() - started_at) * 1000),
+            **extra,
+        },
+    )
+
+
+def _news_items_response(items, limit: int | None = None) -> list[NewsItemResponse]:
+    selected = items[:limit] if limit is not None else items
+    return [
+        NewsItemResponse(
+            ticker=item.ticker,
+            title=item.title,
+            url=item.url,
+            source=item.source,
+            summary=item.summary,
+            sentiment=item.sentiment,
+            impact_category=item.impact_category,
+            confidence=item.confidence,
+            published_at=item.published_at,
+            fetched_at=item.fetched_at,
+        )
+        for item in selected
+    ]
+
+
+def _earnings_events_response(events) -> list[EarningsEventResponse]:
+    return [
+        EarningsEventResponse(
+            ticker=event.ticker,
+            report_date=event.report_date,
+            report_time=event.report_time,
+            eps_estimate=event.eps_estimate,
+            eps_actual=event.eps_actual,
+            revenue_estimate=event.revenue_estimate,
+            revenue_actual=event.revenue_actual,
+        )
+        for event in events
+    ]
 
 
 @app.get("/", include_in_schema=False)
@@ -314,6 +367,34 @@ def create_position(
     profile = identity_service.get_profile(current_user.user_id)
     try:
         position = portfolio_service.add_position(
+            user_id=current_user.user_id,
+            instrument_type=request.instrument_type,
+            symbol=request.symbol,
+            quantity=request.quantity,
+            purchase_date=request.purchase_date,
+            purchase_price=request.purchase_price,
+            purchase_currency=request.purchase_currency,
+            benchmark_preference=profile.benchmark_preference,
+            risk_tolerance=profile.risk_tolerance,
+            underlying_ticker=request.underlying_ticker,
+            cedear_ratio=request.cedear_ratio,
+            notes=request.notes,
+        )
+    except (PortfolioError, ArgentinaBenchmarkError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return PositionValuationResponse.model_validate(position, from_attributes=True)
+
+
+@app.put("/portfolio/positions/{position_id}", response_model=PositionValuationResponse)
+def update_position(
+    position_id: int,
+    request: UpdatePositionRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> PositionValuationResponse:
+    profile = identity_service.get_profile(current_user.user_id)
+    try:
+        position = portfolio_service.update_position(
+            position_id=position_id,
             user_id=current_user.user_id,
             instrument_type=request.instrument_type,
             symbol=request.symbol,
@@ -493,10 +574,12 @@ def current_benchmarks(
     dependencies=[Depends(ANALYZE_RATE_LIMIT)],
 )
 def analyze(request: AnalyzeRequest) -> TickerAnalysisResponse:
+    started_at = time.perf_counter()
     try:
         analysis = service.analyze_ticker(request.ticker.upper(), Horizon(request.horizon))
     except MarketDataError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    _log_endpoint_timing("analyze", started_at, ticker=request.ticker.upper(), horizon=request.horizon)
     return TickerAnalysisResponse.model_validate(analysis, from_attributes=True)
 
 
@@ -516,6 +599,7 @@ def rankings(
     ),
     current_user: Optional[AuthenticatedUser] = Depends(get_optional_user),
 ) -> list[RankingItemResponse]:
+    started_at = time.perf_counter()
     profile_filter = None
     if current_user is not None:
         profile = identity_service.get_profile(current_user.user_id)
@@ -535,6 +619,17 @@ def rankings(
         )
     except MarketDataError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    _log_endpoint_timing(
+        "rankings",
+        started_at,
+        horizon=horizon,
+        limit=limit,
+        cedear_only=cedear_only,
+        mode=mode,
+        personalized=bool(profile_filter),
+        result_count=len(ranked),
+    )
 
     return [
         RankingItemResponse(
@@ -675,22 +770,16 @@ def news_for_ticker(
     ticker: str,
     limit: int = Query(default=12, ge=1, le=50),
 ) -> list[NewsItemResponse]:
-    items = fetch_news(ticker.upper())[:limit]
-    return [
-        NewsItemResponse(
-            ticker=item.ticker,
-            title=item.title,
-            url=item.url,
-            source=item.source,
-            summary=item.summary,
-            sentiment=item.sentiment,
-            impact_category=item.impact_category,
-            confidence=item.confidence,
-            published_at=item.published_at,
-            fetched_at=item.fetched_at,
-        )
-        for item in items
-    ]
+    started_at = time.perf_counter()
+    normalized_ticker = ticker.upper()
+    cache_key = ("news", normalized_ticker)
+    cached = NEWS_CACHE.get(cache_key)
+    cache_hit = cached is not None
+    if cached is None:
+        cached = _news_items_response(fetch_news(normalized_ticker))
+        NEWS_CACHE.set(cache_key, cached)
+    _log_endpoint_timing("news", started_at, ticker=normalized_ticker, limit=limit, cache_hit=cache_hit)
+    return cached[:limit]
 
 
 @app.get("/earnings/{ticker}", response_model=list[EarningsEventResponse])
@@ -698,19 +787,23 @@ def earnings_for_ticker(
     ticker: str,
     days_ahead: int = Query(default=180, ge=1, le=365),
 ) -> list[EarningsEventResponse]:
-    events = upcoming_earnings([ticker.upper()], days_ahead=days_ahead)
-    return [
-        EarningsEventResponse(
-            ticker=event.ticker,
-            report_date=event.report_date,
-            report_time=event.report_time,
-            eps_estimate=event.eps_estimate,
-            eps_actual=event.eps_actual,
-            revenue_estimate=event.revenue_estimate,
-            revenue_actual=event.revenue_actual,
-        )
-        for event in events
-    ]
+    started_at = time.perf_counter()
+    normalized_ticker = ticker.upper()
+    cache_key = ("ticker", normalized_ticker, days_ahead)
+    cached = EARNINGS_CACHE.get(cache_key)
+    cache_hit = cached is not None
+    if cached is None:
+        events = upcoming_earnings([normalized_ticker], days_ahead=days_ahead)
+        cached = _earnings_events_response(events)
+        EARNINGS_CACHE.set(cache_key, cached)
+    _log_endpoint_timing(
+        "earnings_ticker",
+        started_at,
+        ticker=normalized_ticker,
+        days_ahead=days_ahead,
+        cache_hit=cache_hit,
+    )
+    return cached
 
 
 @app.get("/market/overview", response_model=MarketOverviewResponse)
@@ -718,13 +811,36 @@ def market_overview(
     ticker: Optional[str] = Query(default=None, min_length=1, max_length=16),
     horizon: str = Query(default="short", pattern="^(short|long)$"),
 ) -> MarketOverviewResponse:
+    started_at = time.perf_counter()
+    normalized_ticker = ticker.upper() if ticker else None
+    cache_key = (normalized_ticker, horizon)
+    cached = MARKET_OVERVIEW_CACHE.get(cache_key)
+    cache_hit = cached is not None
+    if cached is not None:
+        _log_endpoint_timing(
+            "market_overview",
+            started_at,
+            ticker=normalized_ticker,
+            horizon=horizon,
+            cache_hit=cache_hit,
+        )
+        return cached
     try:
-        return _build_market_overview(
-            ticker=ticker.upper() if ticker else None,
+        overview = _build_market_overview(
+            ticker=normalized_ticker,
             horizon=Horizon(horizon),
         )
     except MarketDataError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    MARKET_OVERVIEW_CACHE.set(cache_key, overview)
+    _log_endpoint_timing(
+        "market_overview",
+        started_at,
+        ticker=normalized_ticker,
+        horizon=horizon,
+        cache_hit=cache_hit,
+    )
+    return overview
 
 
 @app.get("/earnings/upcoming", response_model=list[EarningsEventResponse])
@@ -732,6 +848,7 @@ def earnings_upcoming(
     days_ahead: int = Query(default=60, ge=1, le=365),
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> list[EarningsEventResponse]:
+    started_at = time.perf_counter()
     profile = identity_service.get_profile(current_user.user_id)
     positions = portfolio_service.list_positions(
         current_user.user_id,
@@ -741,19 +858,22 @@ def earnings_upcoming(
     tickers = sorted({position.underlying_ticker for position in positions})
     if not tickers:
         tickers = service.suggested_cedear_universe()
-    events = upcoming_earnings(tickers, days_ahead=days_ahead)
-    return [
-        EarningsEventResponse(
-            ticker=event.ticker,
-            report_date=event.report_date,
-            report_time=event.report_time,
-            eps_estimate=event.eps_estimate,
-            eps_actual=event.eps_actual,
-            revenue_estimate=event.revenue_estimate,
-            revenue_actual=event.revenue_actual,
-        )
-        for event in events
-    ]
+    cache_key = ("upcoming", current_user.user_id, days_ahead, tuple(tickers))
+    cached = EARNINGS_CACHE.get(cache_key)
+    cache_hit = cached is not None
+    if cached is None:
+        events = upcoming_earnings(tickers, days_ahead=days_ahead)
+        cached = _earnings_events_response(events)
+        EARNINGS_CACHE.set(cache_key, cached)
+    _log_endpoint_timing(
+        "earnings_upcoming",
+        started_at,
+        user_id=current_user.user_id,
+        days_ahead=days_ahead,
+        tickers=len(tickers),
+        cache_hit=cache_hit,
+    )
+    return cached
 
 
 @app.get("/universe", response_model=list[UniverseItemResponse])

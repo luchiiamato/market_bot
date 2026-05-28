@@ -44,6 +44,7 @@ class PositionValuation:
     purchase_date: date
     purchase_price: float
     purchase_currency: str
+    user_notes: str
     current_price: float
     current_price_currency: str
     quote_as_of: date

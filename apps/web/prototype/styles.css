@@ -438,6 +438,10 @@ textarea {
   margin-left: auto;
 }
 
+.account-shell {
+  position: relative;
+}
+
 .account-shortcut {
   display: inline-grid;
   gap: 3px;
@@ -492,6 +496,108 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.account-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(320px, calc(100vw - 24px));
+  border-radius: 18px;
+  border: 1px solid var(--hairline-strong);
+  background:
+    radial-gradient(circle at top right, var(--citrus-glow), transparent 34%),
+    linear-gradient(180deg, var(--surface-card-hover), var(--surface-panel));
+  box-shadow: var(--shadow-card);
+  padding: 10px;
+  z-index: 30;
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
+  pointer-events: none;
+  transition:
+    opacity var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
+}
+
+.account-menu:not(.is-hidden) {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.account-menu-body {
+  display: grid;
+  gap: 8px;
+}
+
+.account-menu-head {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.account-menu-head strong {
+  font-family: var(--font-display);
+  font-size: 1.08rem;
+  letter-spacing: -0.02em;
+}
+
+.account-menu-copy {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.account-menu-actions {
+  display: grid;
+  gap: 6px;
+  padding-top: 6px;
+}
+
+.account-menu-action {
+  width: 100%;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--text);
+  transition:
+    border-color var(--motion-fast) var(--ease-out),
+    background var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
+}
+
+.account-menu-action:hover,
+.account-menu-action:focus-visible {
+  border-color: var(--citrus-mid-border);
+  background: var(--surface-tooltip);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.account-menu-action strong {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.account-menu-action span {
+  color: var(--text-dim);
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.account-menu-action.is-danger:hover,
+.account-menu-action.is-danger:focus-visible {
+  border-color: var(--bear-border);
+  background: var(--bear-bg);
 }
 
 /* ----------------------------- Hero ----------------------------- */
@@ -1545,6 +1651,26 @@ button[data-busy="true"] .button-label {
 
 .portfolio-load-card .mode-group {
   width: fit-content;
+}
+
+.position-editor-shell {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--citrus-soft-border);
+  background:
+    radial-gradient(circle at top right, var(--citrus-glow), transparent 38%),
+    linear-gradient(180deg, var(--surface-tooltip), var(--surface-card));
+}
+
+.position-editor-shell h4 {
+  margin: 6px 0 0;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
 }
 
 .portfolio-inline-status,
@@ -3984,6 +4110,22 @@ button[data-busy="true"] .button-label {
 
 .holding-actions {
   justify-items: end;
+}
+
+.holding-actions-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.holding-card.is-editing {
+  border-color: var(--citrus-mid-border);
+  box-shadow: var(--shadow-selected);
+}
+
+.holding-card.is-editing .holding-head {
+  position: relative;
 }
 
 .holding-metrics {
