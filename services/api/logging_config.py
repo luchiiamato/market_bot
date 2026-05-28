@@ -163,6 +163,7 @@ from fastapi import HTTPException, Request, status
 
 _RateBucket = deque[float]
 _BUCKETS: dict[str, dict[str, _RateBucket]] = defaultdict(lambda: defaultdict(deque))
+_FAILURE_BUCKETS: dict[str, dict[str, _RateBucket]] = defaultdict(lambda: defaultdict(deque))
 _LOCK = Lock()
 
 
@@ -194,7 +195,54 @@ def rate_limit(*, key: str, max_hits: int, window_seconds: int) -> Callable:
     return _dependency
 
 
+def _client_host(request: Request) -> str:
+    return request.client.host if request.client else "anonymous"
+
+
+def _auth_subject(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    return normalized or "__anonymous__"
+
+
+def auth_failure_retry_after(
+    *,
+    key: str,
+    request: Request,
+    subject: str | None,
+    max_hits: int,
+    window_seconds: int,
+) -> int | None:
+    client = _client_host(request)
+    bucket_key = f"{client}:{_auth_subject(subject)}"
+    now = time.monotonic()
+    cutoff = now - window_seconds
+    with _LOCK:
+        bucket = _FAILURE_BUCKETS[key][bucket_key]
+        while bucket and bucket[0] < cutoff:
+            bucket.popleft()
+        if len(bucket) < max_hits:
+            return None
+        return max(1, int(window_seconds - (now - bucket[0])))
+
+
+def record_auth_failure(*, key: str, request: Request, subject: str | None) -> None:
+    client = _client_host(request)
+    bucket_key = f"{client}:{_auth_subject(subject)}"
+    now = time.monotonic()
+    with _LOCK:
+        _FAILURE_BUCKETS[key][bucket_key].append(now)
+
+
+def clear_auth_failures(*, key: str, request: Request, subject: str | None) -> None:
+    client = _client_host(request)
+    bucket_key = f"{client}:{_auth_subject(subject)}"
+    with _LOCK:
+        if key in _FAILURE_BUCKETS:
+            _FAILURE_BUCKETS[key].pop(bucket_key, None)
+
+
 def reset_rate_buckets() -> None:
     """Test helper — wipe the in-memory bucket state."""
     with _LOCK:
         _BUCKETS.clear()
+        _FAILURE_BUCKETS.clear()

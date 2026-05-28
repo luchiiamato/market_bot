@@ -8,6 +8,9 @@ venv/
 *.pyc
 *.pyo
 *.pyd
+.env
+.env.*
+!.env.example
 
 data/generated/
 data/app/

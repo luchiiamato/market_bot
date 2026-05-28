@@ -13,9 +13,12 @@ const fs = require("fs");
 const path = require("path");
 
 const apiBase = (process.env.MARKET_BOT_API_BASE || "").trim().replace(/\/$/, "");
+const localApiBase = (process.env.MARKET_BOT_LOCAL_API_BASE || "http://127.0.0.1:8000").trim().replace(/\/$/, "");
 
 const lines = [
   "// Generated at Vercel build time. Do not edit by hand.",
+  'window.MARKET_BOT_RUNTIME_MODE = "host";',
+  `window.MARKET_BOT_LOCAL_API_BASE = ${JSON.stringify(localApiBase)};`,
   `window.MARKET_BOT_API_BASE = ${JSON.stringify(apiBase)};`,
   "",
 ];
@@ -23,4 +26,7 @@ const lines = [
 const target = path.join(__dirname, "config.js");
 fs.writeFileSync(target, lines.join("\n"), "utf8");
 
-console.log(`[build] wrote ${target} with MARKET_BOT_API_BASE=${apiBase || "(empty — will fall back to same origin)"}`);
+console.log(
+  `[build] wrote ${target} with mode=host MARKET_BOT_API_BASE=${apiBase || "(empty — will fall back to same origin)"} ` +
+  `MARKET_BOT_LOCAL_API_BASE=${localApiBase}`
+);

@@ -43,19 +43,25 @@
           <span class="masthead-dot" aria-hidden="true"></span>
           Market·Bot / Editorial Terminal / v1
         </span>
-        <div class="theme-switch" role="radiogroup" aria-label="Tema visual">
-          <button type="button" class="theme-pill" data-theme-pick="dark" aria-pressed="true">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-            </svg>
-            <span class="theme-pill-label">Dark</span>
-          </button>
-          <button type="button" class="theme-pill" data-theme-pick="light" aria-pressed="false">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="4" />
-              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-            </svg>
-            <span class="theme-pill-label">Light</span>
+        <div class="masthead-actions">
+          <div class="theme-switch" role="radiogroup" aria-label="Tema visual">
+            <button type="button" class="theme-pill" data-theme-pick="dark" aria-pressed="true">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </svg>
+              <span class="theme-pill-label">Dark</span>
+            </button>
+            <button type="button" class="theme-pill" data-theme-pick="light" aria-pressed="false">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+              </svg>
+              <span class="theme-pill-label">Light</span>
+            </button>
+          </div>
+          <button type="button" class="account-shortcut" id="account-shortcut" aria-label="Abrir acceso y settings">
+            <span class="account-shortcut-kicker" id="account-shortcut-kicker">Guest</span>
+            <strong class="account-shortcut-label" id="account-shortcut-label">Login</strong>
           </button>
         </div>
       </div>
@@ -109,111 +115,31 @@
         </div>
 
         <aside class="hero-sidebar">
-          <div class="sidebar-card auth-card">
+          <div class="sidebar-card account-teaser-card">
             <div class="panel-header compact-header">
               <div>
-                <p class="sidebar-kicker">Tu espacio</p>
-                <h2 id="auth-title">Ingresá para guardar perfil y portfolio</h2>
+                <p class="sidebar-kicker">Cuenta</p>
+                <h2 id="account-card-title">Acceso separado del landing</h2>
               </div>
-              <div class="mode-group" role="tablist" aria-label="Modo de acceso">
-                <button type="button" class="mode-pill is-selected" data-auth-mode="login">Login</button>
-                <button type="button" class="mode-pill" data-auth-mode="register">Registro</button>
-              </div>
+              <span class="tone-chip" id="account-card-chip">Guest</span>
             </div>
-
-            <form class="auth-form" id="auth-form">
-              <label class="field">
-                <span class="field-label">Username</span>
-                <input id="auth-username" name="username" type="text" autocomplete="username" />
-              </label>
-
-              <label class="field auth-register-only is-hidden" id="auth-display-name-wrap">
-                <span class="field-label">Display name</span>
-                <input id="auth-display-name" name="displayName" type="text" autocomplete="nickname" />
-              </label>
-
-              <label class="field">
-                <span class="field-label">Password</span>
-                <input id="auth-password" name="password" type="password" autocomplete="current-password" />
-              </label>
-
-              <button type="submit" class="primary-button auth-submit" id="auth-submit">
-                <span class="button-label">Ingresar</span>
-                <span class="button-spinner" aria-hidden="true"></span>
+            <p class="panel-caption account-caption" id="account-card-copy">El acceso ya no interrumpe la landing. Entrás por una superficie aparte y después administrás settings desde arriba a la derecha.</p>
+            <div class="account-card-actions">
+              <button type="button" class="primary-button account-card-button" id="open-account-button">
+                <span class="button-label">Ir a login</span>
               </button>
-            </form>
-
-            <div class="profile-shell is-hidden" id="profile-shell">
-              <div class="profile-summary">
-                <div>
-                  <p class="sidebar-kicker">Perfil inversor</p>
-                  <h3 id="profile-username">-</h3>
-                </div>
-                <button type="button" class="ghost-button" id="logout-button">Salir</button>
-              </div>
-
-              <form class="profile-form" id="profile-form">
-                <label class="field span-2">
-                  <span class="field-label">Nombre visible</span>
-                  <input id="profile-display-name" name="displayName" type="text" />
-                </label>
-
-                <label class="field">
-                  <span class="field-label">Perfil</span>
-                  <select id="profile-investor-profile" name="investorProfile">
-                    <option value="conservative">Conservador</option>
-                    <option value="moderate">Moderado</option>
-                    <option value="aggressive">Agresivo</option>
-                  </select>
-                </label>
-
-                <label class="field">
-                  <span class="field-label">Horizonte</span>
-                  <select id="profile-preferred-horizon" name="preferredHorizon">
-                    <option value="mixed">Mixto</option>
-                    <option value="short">Corto</option>
-                    <option value="long">Largo</option>
-                  </select>
-                </label>
-
-                <label class="field">
-                  <span class="field-label">Instrumentos</span>
-                  <select id="profile-preferred-instruments" name="preferredInstruments">
-                    <option value="both">Ambos</option>
-                    <option value="cedear">CEDEAR</option>
-                    <option value="stock">Stocks</option>
-                  </select>
-                </label>
-
-                <label class="field">
-                  <span class="field-label">Riesgo</span>
-                  <select id="profile-risk-tolerance" name="riskTolerance">
-                    <option value="low">Bajo</option>
-                    <option value="medium">Medio</option>
-                    <option value="high">Alto</option>
-                  </select>
-                </label>
-
-                <label class="field span-2">
-                  <span class="field-label">Benchmark FX</span>
-                  <select id="profile-benchmark-preference" name="benchmarkPreference">
-                    <option value="official">Oficial</option>
-                    <option value="mep">MEP</option>
-                    <option value="ccl">CCL</option>
-                  </select>
-                </label>
-
-                <button type="submit" class="primary-button">
-                  <span class="button-label">Guardar perfil</span>
-                </button>
-              </form>
+              <button type="button" class="ghost-button" id="open-portfolio-button">Ver portfolio</button>
             </div>
-
-            <p class="status-line" id="auth-status" aria-live="polite">Podés entrar o registrarte sin mail.</p>
           </div>
 
           <div class="sidebar-card quick-card">
-            <p class="sidebar-kicker">Portfolio rápido</p>
+            <div class="quick-card-head">
+              <p class="sidebar-kicker">Portfolio rápido</p>
+              <div class="mini-summary-switch" role="tablist" aria-label="Moneda del P&L rápido">
+                <button type="button" class="mini-summary-pill is-selected" data-mini-summary-currency="ARS" aria-selected="true">ARS</button>
+                <button type="button" class="mini-summary-pill" data-mini-summary-currency="USD" aria-selected="false">USD</button>
+              </div>
+            </div>
             <div class="mini-summary-grid" id="mini-summary-grid">
               <div class="metric-tile">
                 <span class="metric-label">Estado</span>
@@ -239,6 +165,7 @@
           </div>
           <div class="surface-tabs" role="tablist" aria-label="Superficies del producto">
             <button type="button" class="surface-tab is-selected" data-surface="workspace">Workspace</button>
+            <button type="button" class="surface-tab" data-surface="portfolio">Portfolio</button>
             <button type="button" class="surface-tab" data-surface="howto">How to use</button>
             <button type="button" class="surface-tab" data-surface="learning">Learning</button>
             <button type="button" class="surface-tab" data-surface="trading">Trading / Wallbit</button>
@@ -247,119 +174,6 @@
 
         <div class="surface-slider" data-active-surface="workspace" data-direction="forward">
         <div class="surface-stack is-active" id="surface-workspace" data-surface-id="workspace">
-          <section class="panel portfolio-panel">
-            <div class="panel-header">
-              <div>
-                <p class="panel-kicker">Portfolio</p>
-                <h2>Tus posiciones y ganancia real</h2>
-              </div>
-              <p class="panel-caption">Carga manual en v1. CEDEAR y benchmarks ARG integrados.</p>
-            </div>
-
-            <div class="empty-state" id="portfolio-locked-state">
-              <strong>Ingresá para ver tu workspace de posiciones.</strong>
-              <p>Cuando tengas sesión activa vas a poder cargar CEDEARs o stocks, ver P&amp;L en ARS/USD y comparar contra inflación, MEP, CCL y plazo fijo.</p>
-            </div>
-
-            <div class="portfolio-shell is-hidden" id="portfolio-shell">
-              <form class="portfolio-import-form" id="portfolio-import-form">
-                <div class="portfolio-import-copy span-2">
-                  <p class="analysis-kicker">Importar desde Balanz</p>
-                  <h3>Leé tu extracto y cargá los lotes abiertos de una vez</h3>
-                  <p>Subí el `.xlsx` exportado por Balanz. En esta v1 se importan sólo CEDEARs y stocks; bonos, dividendos y movimientos no soportados se saltean y quedan reportados.</p>
-                </div>
-
-                <label class="field span-2">
-                  <span class="field-label">Extracto Balanz (.xlsx)</span>
-                  <input id="portfolio-import-file" name="balanzFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
-                </label>
-
-                <label class="portfolio-import-toggle span-2" for="portfolio-import-replace">
-                  <input id="portfolio-import-replace" name="replaceExisting" type="checkbox" />
-                  <span>Reemplazar mis posiciones actuales con lo que venga en el extracto</span>
-                </label>
-
-                <button type="submit" class="primary-button span-2">
-                  <span class="button-label">Importar extracto</span>
-                  <span class="button-spinner" aria-hidden="true"></span>
-                </button>
-              </form>
-
-              <p class="status-line" id="portfolio-import-status" aria-live="polite">Podés seguir cargando manualmente o importar tu extracto de Balanz.</p>
-
-              <form class="portfolio-form" id="portfolio-form">
-                <div class="mode-group" role="tablist" aria-label="Tipo de instrumento">
-                  <button type="button" class="mode-pill is-selected" data-instrument-type="cedear">CEDEAR</button>
-                  <button type="button" class="mode-pill" data-instrument-type="stock">Stock</button>
-                </div>
-
-                <label class="field">
-                  <span class="field-label">Ticker</span>
-                  <input id="position-symbol" name="symbol" type="text" placeholder="AAPL, TSLA, MELI" />
-                </label>
-
-                <label class="field">
-                  <span class="field-label">Cantidad</span>
-                  <input id="position-quantity" name="quantity" type="number" min="0.0001" step="0.0001" />
-                </label>
-
-                <label class="field">
-                  <span class="field-label">Fecha compra</span>
-                  <input id="position-purchase-date" name="purchaseDate" type="date" />
-                </label>
-
-                <label class="field">
-                  <span class="field-label">Precio compra</span>
-                  <input id="position-purchase-price" name="purchasePrice" type="number" min="0.01" step="0.01" />
-                </label>
-
-                <label class="field">
-                  <span class="field-label">Moneda compra</span>
-                  <select id="position-purchase-currency" name="purchaseCurrency">
-                    <option value="ARS">ARS</option>
-                    <option value="USD">USD</option>
-                  </select>
-                </label>
-
-                <label class="field">
-                  <span class="field-label">Underlying opcional</span>
-                  <input id="position-underlying" name="underlyingTicker" type="text" placeholder="Auto si coincide" />
-                </label>
-
-                <label class="field">
-                  <span class="field-label">Ratio CEDEAR opcional</span>
-                  <input id="position-ratio" name="cedearRatio" type="number" min="0.01" step="0.01" placeholder="Auto si vacío" />
-                </label>
-
-                <label class="field span-2">
-                  <span class="field-label">Notas</span>
-                  <textarea id="position-notes" name="notes" rows="2" placeholder="Tesis, broker, comentario"></textarea>
-                </label>
-
-                <button type="submit" class="primary-button">
-                  <span class="button-label">Agregar posición</span>
-                  <span class="button-spinner" aria-hidden="true"></span>
-                </button>
-              </form>
-
-              <p class="status-line" id="portfolio-status" aria-live="polite">Listo para cargar posiciones.</p>
-
-              <div class="summary-grid" id="portfolio-summary-grid"></div>
-              <div class="holdings-grid" id="holdings-grid"></div>
-            </div>
-          </section>
-
-          <section class="panel benchmark-panel is-hidden" id="benchmark-panel">
-            <div class="panel-header">
-              <div>
-                <p class="panel-kicker">Benchmark</p>
-                <h2>Benchmark vs tu portfolio</h2>
-              </div>
-              <p class="panel-caption">Tracked value en ARS por benchmark, ordenado para ver outperformance.</p>
-            </div>
-            <div class="benchmark-bars" id="benchmark-bars"></div>
-          </section>
-
           <section class="panel radar-panel">
             <div class="panel-header">
               <div>
@@ -379,9 +193,6 @@
               </div>
               <div class="market-chip" id="market-chip">Short horizon</div>
             </div>
-
-            <div class="concept-ribbon" id="concept-ribbon"></div>
-            <div class="tooltip-preview" id="tooltip-preview" aria-live="polite">Pasá por un concepto para ver una explicación rápida.</div>
 
             <div class="verdict-grid" id="verdict-grid"></div>
 
@@ -474,6 +285,188 @@
                   </div>
                 </div>
               </article>
+            </div>
+          </section>
+        </div>
+
+        <div class="surface-stack" id="surface-portfolio" data-surface-id="portfolio">
+          <section class="panel portfolio-panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Portfolio</p>
+                <h2>Tus posiciones y ganancia real</h2>
+              </div>
+              <p class="panel-caption">Workspace separado del landing para cargar, comparar y leer rendimientos con más claridad.</p>
+            </div>
+
+            <div class="portfolio-hero">
+              <article class="portfolio-hero-card">
+                <p class="analysis-kicker">Workspace de posiciones</p>
+                <h3>Una vista para entender qué tenés y otra para cargar sin mezclar las dos tareas.</h3>
+                <p>Acá vive todo lo de portfolio: resumen real en ARS y USD, import desde Balanz, carga manual y rendimientos por ticker.</p>
+              </article>
+              <article class="portfolio-hero-note">
+                <p class="analysis-kicker">Benchmark ARG</p>
+                <h3>Inflación, MEP, CCL y plazo fijo como referencia real.</h3>
+                <p>La idea es que la ganancia nominal no te engañe. El benchmark sólo aparece cuando ya hay posiciones cargadas.</p>
+              </article>
+            </div>
+
+            <div class="portfolio-view-tabs" role="tablist" aria-label="Vistas del portfolio">
+              <button type="button" class="portfolio-view-tab is-selected" data-portfolio-view-tab="summary">Resumen</button>
+              <button type="button" class="portfolio-view-tab" data-portfolio-view-tab="load">Cargar</button>
+              <button type="button" class="portfolio-view-tab" data-portfolio-view-tab="holdings">Posiciones</button>
+            </div>
+
+            <div class="empty-state" id="portfolio-locked-state">
+              <strong>Ingresá para ver tu workspace de posiciones.</strong>
+              <p>Cuando tengas sesión activa vas a poder cargar CEDEARs o stocks, ver P&amp;L en ARS/USD y comparar contra inflación, MEP, CCL y plazo fijo.</p>
+            </div>
+
+            <div class="portfolio-shell is-hidden" id="portfolio-shell">
+              <section class="portfolio-view is-active" id="portfolio-view-summary" data-portfolio-view="summary">
+                <div class="portfolio-section-head">
+                  <div>
+                    <p class="analysis-kicker">Snapshot</p>
+                    <h3>Estado general del portfolio</h3>
+                  </div>
+                  <p class="panel-caption">Métricas agregadas primero; benchmark después, sólo cuando ya hay algo que comparar.</p>
+                </div>
+                <div class="empty-state is-hidden" id="portfolio-empty-summary">
+                  <strong>No hay nada precargado.</strong>
+                  <p>Todavía no cargaste posiciones. Andá al tab <em>Cargar</em> para importar tu extracto o sumar una posición manualmente.</p>
+                </div>
+                <div class="summary-grid" id="portfolio-summary-grid"></div>
+                <article class="portfolio-subpanel benchmark-panel is-hidden" id="benchmark-panel">
+                  <div class="portfolio-subpanel-head">
+                    <div>
+                      <p class="panel-kicker">Benchmark</p>
+                      <h3>Benchmark vs tu portfolio</h3>
+                    </div>
+                    <p class="panel-caption">Tracked value en ARS por benchmark, ordenado para ver outperformance.</p>
+                  </div>
+                  <div class="benchmark-bars" id="benchmark-bars"></div>
+                </article>
+              </section>
+
+              <section class="portfolio-view" id="portfolio-view-load" data-portfolio-view="load">
+                <div class="portfolio-load-grid">
+                  <article class="portfolio-load-card">
+                    <div class="portfolio-section-head">
+                      <div>
+                        <p class="analysis-kicker">Import automático</p>
+                        <h3>Traer lotes abiertos desde Balanz</h3>
+                      </div>
+                      <p class="panel-caption">Para cuando ya tenés extracto y no querés cargar ticker por ticker.</p>
+                    </div>
+
+                    <form class="portfolio-import-form" id="portfolio-import-form">
+                      <div class="portfolio-import-copy span-2">
+                        <p>Subí el `.xlsx` exportado por Balanz. En esta v1 se importan sólo CEDEARs y stocks; bonos, dividendos y movimientos no soportados se saltean y quedan reportados.</p>
+                      </div>
+
+                      <label class="field span-2">
+                        <span class="field-label">Extracto Balanz (.xlsx)</span>
+                        <input id="portfolio-import-file" name="balanzFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                      </label>
+
+                      <label class="portfolio-import-toggle span-2" for="portfolio-import-replace">
+                        <input id="portfolio-import-replace" name="replaceExisting" type="checkbox" />
+                        <span>Reemplazar mis posiciones actuales con lo que venga en el extracto</span>
+                      </label>
+
+                      <button type="submit" class="primary-button span-2">
+                        <span class="button-label">Importar extracto</span>
+                        <span class="button-spinner" aria-hidden="true"></span>
+                      </button>
+                    </form>
+
+                    <p class="status-line portfolio-inline-status" id="portfolio-import-status" aria-live="polite">Podés seguir cargando manualmente o importar tu extracto de Balanz.</p>
+                  </article>
+
+                  <article class="portfolio-load-card">
+                    <div class="portfolio-section-head">
+                      <div>
+                        <p class="analysis-kicker">Carga manual</p>
+                        <h3>Agregar una posición puntual</h3>
+                      </div>
+                      <p class="panel-caption">Más útil para probar, corregir o sumar una operación individual.</p>
+                    </div>
+
+                    <form class="portfolio-form" id="portfolio-form">
+                      <div class="mode-group span-2" role="tablist" aria-label="Tipo de instrumento">
+                        <button type="button" class="mode-pill is-selected" data-instrument-type="cedear">CEDEAR</button>
+                        <button type="button" class="mode-pill" data-instrument-type="stock">Stock</button>
+                      </div>
+
+                      <label class="field">
+                        <span class="field-label">Ticker</span>
+                        <input id="position-symbol" name="symbol" type="text" placeholder="AAPL, TSLA, MELI" />
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">Cantidad</span>
+                        <input id="position-quantity" name="quantity" type="number" min="0.0001" step="0.0001" />
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">Fecha compra</span>
+                        <input id="position-purchase-date" name="purchaseDate" type="date" />
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">Precio compra</span>
+                        <input id="position-purchase-price" name="purchasePrice" type="number" min="0.01" step="0.01" />
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">Moneda compra</span>
+                        <select id="position-purchase-currency" name="purchaseCurrency">
+                          <option value="ARS">ARS</option>
+                          <option value="USD">USD</option>
+                        </select>
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">Underlying opcional</span>
+                        <input id="position-underlying" name="underlyingTicker" type="text" placeholder="Auto si coincide" />
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">Ratio CEDEAR opcional</span>
+                        <input id="position-ratio" name="cedearRatio" type="number" min="0.01" step="0.01" placeholder="Auto si vacío" />
+                      </label>
+
+                      <label class="field span-2">
+                        <span class="field-label">Notas</span>
+                        <textarea id="position-notes" name="notes" rows="2" placeholder="Tesis, broker, comentario"></textarea>
+                      </label>
+
+                      <button type="submit" class="primary-button span-2">
+                        <span class="button-label">Agregar posición</span>
+                        <span class="button-spinner" aria-hidden="true"></span>
+                      </button>
+                    </form>
+
+                    <p class="status-line portfolio-inline-status" id="portfolio-status" aria-live="polite">Listo para cargar posiciones.</p>
+                  </article>
+                </div>
+              </section>
+
+              <section class="portfolio-view" id="portfolio-view-holdings" data-portfolio-view="holdings">
+                <div class="portfolio-section-head">
+                  <div>
+                    <p class="analysis-kicker">Posiciones cargadas</p>
+                    <h3>Rendimiento por ticker</h3>
+                  </div>
+                  <p class="panel-caption">Cada card mezcla valuación actual, P&amp;L y comparación contra benchmarks relevantes.</p>
+                </div>
+                <div class="empty-state is-hidden" id="portfolio-empty-holdings">
+                  <strong>No hay nada precargado.</strong>
+                  <p>Todavía no cargaste posiciones. Cuando sumes algo, este tab te va a mostrar los rendimientos por ticker.</p>
+                </div>
+                <div class="holdings-grid" id="holdings-grid"></div>
+              </section>
             </div>
           </section>
         </div>
@@ -666,6 +659,136 @@
             </div>
           </section>
         </div>
+
+        <div class="surface-stack access-overlay" id="surface-access" data-surface-id="access">
+          <section class="panel access-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Cuenta / Settings</p>
+                <h2>Acceso y perfil fuera de la landing</h2>
+              </div>
+              <button type="button" class="ghost-button" id="close-account-button">Volver al workspace</button>
+            </div>
+
+            <div class="access-grid">
+              <div class="sidebar-card auth-card">
+                <div class="access-card-head">
+                  <div>
+                    <p class="sidebar-kicker">Tu espacio</p>
+                    <h2 id="auth-title">Ingresá para guardar perfil y portfolio</h2>
+                    <p class="access-card-copy">Entrás una vez y desde acá ajustás perfil, settings y benchmarks sin volver a tocar la landing.</p>
+                  </div>
+                  <div class="mode-group access-mode-group" role="tablist" aria-label="Modo de acceso">
+                    <button type="button" class="mode-pill is-selected" data-auth-mode="login">Login</button>
+                    <button type="button" class="mode-pill" data-auth-mode="register">Registro</button>
+                  </div>
+                </div>
+
+                <div class="access-card-body">
+                  <form class="auth-form" id="auth-form">
+                    <label class="field">
+                      <span class="field-label">Username</span>
+                      <input id="auth-username" name="username" type="text" autocomplete="username" />
+                    </label>
+
+                    <label class="field auth-register-only is-hidden" id="auth-display-name-wrap">
+                      <span class="field-label">Display name</span>
+                      <input id="auth-display-name" name="displayName" type="text" autocomplete="nickname" />
+                    </label>
+
+                    <label class="field">
+                      <span class="field-label">Password</span>
+                      <input id="auth-password" name="password" type="password" autocomplete="current-password" />
+                    </label>
+
+                    <button type="submit" class="primary-button auth-submit" id="auth-submit">
+                      <span class="button-label">Ingresar</span>
+                      <span class="button-spinner" aria-hidden="true"></span>
+                    </button>
+                  </form>
+
+                  <div class="profile-shell is-hidden" id="profile-shell">
+                    <div class="profile-summary">
+                      <div>
+                        <p class="sidebar-kicker">Perfil inversor</p>
+                        <h3 id="profile-username">-</h3>
+                      </div>
+                      <button type="button" class="ghost-button" id="logout-button">Salir</button>
+                    </div>
+
+                    <form class="profile-form" id="profile-form">
+                      <label class="field span-2">
+                        <span class="field-label">Nombre visible</span>
+                        <input id="profile-display-name" name="displayName" type="text" />
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">Perfil</span>
+                        <select id="profile-investor-profile" name="investorProfile">
+                          <option value="conservative">Conservador</option>
+                          <option value="moderate">Moderado</option>
+                          <option value="aggressive">Agresivo</option>
+                        </select>
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">Horizonte</span>
+                        <select id="profile-preferred-horizon" name="preferredHorizon">
+                          <option value="mixed">Mixto</option>
+                          <option value="short">Corto</option>
+                          <option value="long">Largo</option>
+                        </select>
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">Instrumentos</span>
+                        <select id="profile-preferred-instruments" name="preferredInstruments">
+                          <option value="both">Ambos</option>
+                          <option value="cedear">CEDEAR</option>
+                          <option value="stock">Stocks</option>
+                        </select>
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">Riesgo</span>
+                        <select id="profile-risk-tolerance" name="riskTolerance">
+                          <option value="low">Bajo</option>
+                          <option value="medium">Medio</option>
+                          <option value="high">Alto</option>
+                        </select>
+                      </label>
+
+                      <label class="field span-2">
+                        <span class="field-label">Benchmark FX</span>
+                        <select id="profile-benchmark-preference" name="benchmarkPreference">
+                          <option value="official">Oficial</option>
+                          <option value="mep">MEP</option>
+                          <option value="ccl">CCL</option>
+                        </select>
+                      </label>
+
+                      <button type="submit" class="primary-button span-2">
+                        <span class="button-label">Guardar perfil</span>
+                      </button>
+                    </form>
+                  </div>
+
+                  <p class="status-line access-status-line" id="auth-status" aria-live="polite">Podés entrar o registrarte sin mail.</p>
+                </div>
+              </div>
+
+              <article class="analysis-card access-note-card">
+                <p class="analysis-kicker">Flujo nuevo</p>
+                <h3>Login y settings viven separados del landing.</h3>
+                <ul class="reason-list">
+                  <li>La landing queda enfocada en radar y análisis, no en formularios de cuenta.</li>
+                  <li>Una vez adentro, el portfolio se administra en su propia superficie con tabs.</li>
+                  <li>Los settings siguen accesibles desde arriba a la derecha sin ensuciar el flujo principal.</li>
+                </ul>
+              </article>
+            </div>
+          </section>
+        </div>
         </div>
       </main>
     </div>
@@ -713,10 +836,10 @@
     </script>
     <script>
       // Segmented control sliding indicator + optimistic visual update.
-      // Works for .horizon-group, .mode-group, .surface-tabs, .theme-switch.
+      // Works for .horizon-group, .mode-group, .surface-tabs, .portfolio-view-tabs, .theme-switch.
       (function () {
         if (!("MutationObserver" in window)) return;
-        var GROUPS = ".horizon-group, .mode-group, .surface-tabs, .theme-switch";
+        var GROUPS = ".horizon-group, .mode-group, .surface-tabs, .portfolio-view-tabs, .theme-switch";
 
         function setupGroup(group) {
           var indicator = group.querySelector(":scope > .seg-indicator");

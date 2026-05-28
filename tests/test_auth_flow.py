@@ -81,6 +81,61 @@ def test_login_rate_limited_after_too_many_attempts(api_client):
     assert "Retry-After" in blocked.headers
 
 
+def test_successful_login_clears_failed_attempt_bucket(api_client):
+    api_client.post(
+        "/auth/register",
+        json={"username": "erin", "password": "secret123"},
+    )
+    for _ in range(4):
+        response = api_client.post(
+            "/auth/login",
+            json={"username": "erin", "password": "wrongpw1"},
+        )
+        assert response.status_code == 401
+
+    success = api_client.post(
+        "/auth/login",
+        json={"username": "erin", "password": "secret123"},
+    )
+    assert success.status_code == 200, success.text
+
+    failed_again = api_client.post(
+        "/auth/login",
+        json={"username": "erin", "password": "wrongpw1"},
+    )
+    assert failed_again.status_code == 401
+
+
+def test_login_rate_limit_is_scoped_per_username(api_client):
+    api_client.post(
+        "/auth/register",
+        json={"username": "fran", "password": "secret123"},
+    )
+    api_client.post(
+        "/auth/register",
+        json={"username": "gina", "password": "secret123"},
+    )
+
+    for _ in range(5):
+        response = api_client.post(
+            "/auth/login",
+            json={"username": "fran", "password": "wrongpw1"},
+        )
+        assert response.status_code == 401
+
+    blocked = api_client.post(
+        "/auth/login",
+        json={"username": "fran", "password": "wrongpw1"},
+    )
+    assert blocked.status_code == 429
+
+    other_user = api_client.post(
+        "/auth/login",
+        json={"username": "gina", "password": "secret123"},
+    )
+    assert other_user.status_code == 200, other_user.text
+
+
 def test_request_id_header_present(api_client):
     response = api_client.get("/health")
     assert response.status_code == 200

@@ -15,7 +15,7 @@
   --motion-base: 280ms;
   --motion-slow: 620ms;
   --motion-stagger: 70ms;
-  --motion-theme: 320ms;
+  --motion-theme: 180ms;
   --ease-out: cubic-bezier(.16, 1, .3, 1);
   --ease-soft: cubic-bezier(.32, .72, 0, 1);
   --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
@@ -238,6 +238,10 @@ body {
   transition: background-color var(--motion-theme) var(--ease-out), color var(--motion-theme) var(--ease-out);
 }
 
+body[data-overlay="access"] {
+  overflow: hidden;
+}
+
 /* Subtle film grain + dot grid as fixed overlays */
 body::before,
 body::after {
@@ -375,7 +379,7 @@ textarea {
 
 .theme-pill svg {
   display: block;
-  transition: transform var(--motion-base) var(--ease-spring);
+  transition: transform 120ms var(--ease-spring);
 }
 
 .theme-pill:hover,
@@ -408,6 +412,70 @@ textarea {
 
 .theme-pill-label {
   display: inline-block;
+}
+
+.masthead-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.account-shortcut {
+  display: inline-grid;
+  gap: 3px;
+  min-width: 148px;
+  padding: 11px 14px 10px;
+  border-radius: 16px;
+  border: 1px solid var(--hairline);
+  background:
+    radial-gradient(circle at top right, var(--citrus-glow), transparent 38%),
+    linear-gradient(180deg, var(--surface-card), var(--surface-tile));
+  color: var(--text);
+  text-align: left;
+  transition:
+    transform var(--motion-fast) var(--ease-out),
+    border-color var(--motion-base) var(--ease-out),
+    background var(--motion-base) var(--ease-out),
+    box-shadow var(--motion-base) var(--ease-out);
+}
+
+.account-shortcut:hover,
+.account-shortcut:focus-visible {
+  border-color: var(--text-faint);
+  transform: translateY(-1px);
+  box-shadow: 0 18px 28px -24px rgba(0, 0, 0, 0.6);
+  outline: none;
+}
+
+.account-shortcut:active {
+  transform: scale(0.98);
+}
+
+.account-shortcut.is-active {
+  border-color: var(--citrus-mid-border);
+  background:
+    radial-gradient(circle at top right, var(--citrus-glow), transparent 44%),
+    linear-gradient(180deg, var(--surface-tooltip), var(--surface-card));
+}
+
+.account-shortcut-kicker {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.account-shortcut-label {
+  font-family: var(--font-display);
+  font-size: 1.04rem;
+  font-weight: 560;
+  letter-spacing: -0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ----------------------------- Hero ----------------------------- */
@@ -672,6 +740,15 @@ h3 {
   will-change: transform, width;
 }
 
+.theme-switch .seg-indicator {
+  transition:
+    transform 110ms var(--ease-out),
+    width 110ms var(--ease-out),
+    background 140ms var(--ease-out),
+    box-shadow 140ms var(--ease-out),
+    opacity 90ms linear;
+}
+
 /* While the indicator is animating, ripple it gently for affordance */
 .seg-indicator.is-moving {
   box-shadow: var(--shadow-pill), 0 0 0 4px var(--citrus-glow);
@@ -803,6 +880,118 @@ button[data-busy="true"] .button-label {
   margin-bottom: 14px;
 }
 
+.account-teaser-card {
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top right, var(--citrus-glow), transparent 34%),
+    linear-gradient(180deg, var(--surface-tile-grad-from), var(--surface-tile-grad-to));
+}
+
+.account-caption {
+  max-width: 44ch;
+}
+
+.account-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 18px;
+  align-items: center;
+}
+
+.account-card-button {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.quick-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.quick-card-head .sidebar-kicker {
+  margin: 0;
+}
+
+.mini-summary-switch {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: var(--surface-segmented);
+}
+
+.mini-summary-pill {
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition:
+    color var(--motion-fast) var(--ease-out),
+    background var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
+}
+
+.mini-summary-pill:hover,
+.mini-summary-pill:focus-visible {
+  color: var(--text);
+  outline: none;
+}
+
+.mini-summary-pill:active {
+  transform: scale(0.97);
+}
+
+.mini-summary-pill.is-selected {
+  color: var(--pill-active-text);
+  background: var(--pill-active-bg);
+  box-shadow: var(--shadow-pill);
+}
+
+.auth-card {
+  display: grid;
+  gap: 20px;
+  padding: 26px;
+  background:
+    radial-gradient(circle at top right, var(--citrus-glow), transparent 34%),
+    linear-gradient(180deg, var(--surface-tile-grad-from), var(--surface-tile-grad-to));
+}
+
+.access-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.access-mode-group {
+  flex: 0 0 auto;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+
+.access-card-copy {
+  max-width: 42ch;
+  margin: 10px 0 0;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+.access-card-body {
+  display: grid;
+  gap: 18px;
+}
+
 .auth-form,
 .profile-form,
 .portfolio-form,
@@ -883,7 +1072,7 @@ button[data-busy="true"] .button-label {
 
 .profile-shell {
   display: grid;
-  gap: 14px;
+  gap: 18px;
 }
 
 .profile-summary,
@@ -903,6 +1092,12 @@ button[data-busy="true"] .button-label {
 }
 
 .auth-submit {
+  min-width: 0;
+}
+
+.auth-form .primary-button,
+.profile-form .primary-button {
+  width: 100%;
   min-width: 0;
 }
 
@@ -1008,7 +1203,8 @@ button[data-busy="true"] .button-label {
 .portfolio-panel,
 .howto-panel,
 .learning-panel,
-.trading-panel {
+.trading-panel,
+.access-panel {
   grid-column: 1 / -1;
 }
 
@@ -1057,6 +1253,94 @@ button[data-busy="true"] .button-label {
   /* background is provided by .seg-indicator */
 }
 
+.portfolio-hero,
+.portfolio-load-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.portfolio-hero {
+  margin-bottom: 18px;
+}
+
+.portfolio-hero-card,
+.portfolio-hero-note,
+.portfolio-load-card {
+  border-radius: 22px;
+  border: 1px solid var(--hairline);
+  background:
+    radial-gradient(circle at top right, var(--citrus-glow), transparent 38%),
+    linear-gradient(180deg, var(--surface-card), var(--surface-tile));
+}
+
+.portfolio-hero-card,
+.portfolio-hero-note {
+  padding: 22px 24px;
+}
+
+.portfolio-hero-card h3,
+.portfolio-hero-note h3 {
+  margin: 10px 0 12px;
+  font-family: var(--font-display);
+  font-size: 1.32rem;
+  line-height: 1.14;
+  letter-spacing: -0.02em;
+}
+
+.portfolio-hero-card p:last-child,
+.portfolio-hero-note p:last-child {
+  margin: 0;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.portfolio-view-tabs {
+  position: relative;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: var(--surface-segmented);
+  margin: 0 0 18px;
+  --seg-pad: 4px;
+}
+
+.portfolio-view-tab {
+  position: relative;
+  z-index: 1;
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 20px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.73rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  transition:
+    color var(--motion-base) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
+}
+
+.portfolio-view-tab:hover,
+.portfolio-view-tab:focus-visible {
+  color: var(--text);
+  outline: none;
+}
+
+.portfolio-view-tab:active {
+  transform: scale(0.97);
+}
+
+.portfolio-view-tab.is-selected {
+  color: var(--pill-active-text);
+}
+
 /* ----------------------------- Surface slider (workspace ↔ howto ↔ learning ↔ trading) -----------------------------
    We stack all surfaces in a single grid cell so the wrapper height equals
    the tallest surface and switching never reflows. Each surface fades +
@@ -1096,6 +1380,47 @@ button[data-busy="true"] .button-label {
   transform: translateX(0);
   filter: blur(0);
   transition-delay: var(--page-stagger);
+}
+
+.access-overlay.surface-stack {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  grid-template-columns: none;
+  grid-template-rows: none;
+  gap: 0;
+  background: rgba(7, 9, 10, 0.54);
+  opacity: 0;
+  pointer-events: none;
+  transform: none;
+  filter: none;
+  transition:
+    opacity 160ms var(--ease-out),
+    background 180ms var(--ease-out);
+}
+
+.access-overlay.is-active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.access-overlay .access-panel {
+  width: min(1120px, calc(100vw - 40px));
+  max-height: min(calc(100vh - 48px), 920px);
+  overflow: auto;
+  transform: translateY(10px) scale(0.985);
+  opacity: 0;
+  transition:
+    transform 180ms var(--ease-out),
+    opacity 140ms linear;
+}
+
+.access-overlay.is-active .access-panel {
+  transform: translateY(0) scale(1);
+  opacity: 1;
 }
 
 /* Direction: the slider sets data-direction on swap so each surface knows
@@ -1146,6 +1471,249 @@ button[data-busy="true"] .button-label {
 .portfolio-shell {
   display: grid;
   gap: 20px;
+}
+
+.portfolio-view {
+  display: none;
+  gap: 16px;
+  align-content: start;
+}
+
+.portfolio-view.is-active {
+  display: grid;
+  animation: reveal var(--motion-base) var(--ease-out) both;
+}
+
+.portfolio-subpanel {
+  border-radius: 22px;
+  padding: 20px;
+  border: 1px solid var(--hairline);
+  background:
+    radial-gradient(circle at top right, var(--citrus-glow), transparent 36%),
+    linear-gradient(180deg, var(--surface-tile), var(--surface-card));
+}
+
+.portfolio-subpanel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.portfolio-section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-end;
+  margin-bottom: 2px;
+}
+
+.portfolio-section-head h3 {
+  margin: 8px 0 0;
+  font-family: var(--font-display);
+  font-size: 1.22rem;
+  letter-spacing: -0.02em;
+}
+
+.portfolio-load-card {
+  padding: 22px;
+  display: grid;
+  gap: 16px;
+}
+
+.portfolio-load-card .portfolio-import-form,
+.portfolio-load-card .portfolio-form {
+  gap: 14px;
+}
+
+.portfolio-load-card .mode-group {
+  width: fit-content;
+}
+
+.portfolio-inline-status,
+.access-status-line {
+  margin-top: 0;
+}
+
+.benchmark-spotlight,
+.benchmark-card {
+  border-radius: 18px;
+  border: 1px solid var(--hairline);
+  background: var(--surface-card);
+}
+
+.benchmark-spotlight {
+  display: grid;
+  gap: 10px;
+  padding: 20px;
+  margin-bottom: 14px;
+  background:
+    radial-gradient(circle at top right, var(--citrus-glow), transparent 42%),
+    linear-gradient(180deg, var(--surface-card), var(--surface-tile));
+}
+
+.benchmark-spotlight h4 {
+  margin: 8px 0 0;
+  font-family: var(--font-display);
+  font-size: 1.18rem;
+  letter-spacing: -0.02em;
+}
+
+.benchmark-spotlight-value {
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 2.2vw, 2.2rem);
+  font-weight: 450;
+  letter-spacing: -0.03em;
+  color: var(--text);
+}
+
+.benchmark-spotlight-copy {
+  margin: 0;
+  color: var(--text-dim);
+  line-height: 1.55;
+  max-width: 68ch;
+}
+
+.benchmark-comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.benchmark-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  transition:
+    transform var(--motion-fast) var(--ease-out),
+    border-color var(--motion-base) var(--ease-out),
+    background var(--motion-theme) var(--ease-out);
+}
+
+.benchmark-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--text-faint);
+}
+
+.benchmark-card.bull {
+  background:
+    radial-gradient(circle at top right, rgba(182, 232, 120, 0.08), transparent 40%),
+    var(--surface-card);
+}
+
+.benchmark-card.bear {
+  background:
+    radial-gradient(circle at top right, rgba(232, 122, 78, 0.08), transparent 40%),
+    var(--surface-card);
+}
+
+.benchmark-card-top,
+.benchmark-meter-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.benchmark-delta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  border: 1px solid var(--hairline);
+}
+
+.benchmark-delta.bull {
+  color: var(--bull);
+  border-color: var(--bull-border);
+  background: var(--bull-bg);
+}
+
+.benchmark-delta.bear {
+  color: var(--bear);
+  border-color: var(--bear-border);
+  background: var(--bear-bg);
+}
+
+.benchmark-card-value {
+  font-family: var(--font-display);
+  font-size: 1.42rem;
+  font-weight: 430;
+  letter-spacing: -0.025em;
+  color: var(--text);
+}
+
+.benchmark-card-copy {
+  margin: 0;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.benchmark-meter-group {
+  display: grid;
+  gap: 10px;
+}
+
+.benchmark-meter {
+  display: grid;
+  gap: 7px;
+}
+
+.benchmark-meter-meta {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.benchmark-meter-meta strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.benchmark-meter-track {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--text-ghost);
+  overflow: hidden;
+}
+
+.benchmark-meter-fill {
+  height: 100%;
+  border-radius: inherit;
+}
+
+.benchmark-meter-fill.benchmark {
+  background: rgba(237, 228, 211, 0.32);
+}
+
+.benchmark-meter-fill.portfolio.bull {
+  background: linear-gradient(90deg, var(--bull), color-mix(in srgb, var(--bull) 72%, white));
+}
+
+.benchmark-meter-fill.portfolio.bear {
+  background: linear-gradient(90deg, var(--bear), color-mix(in srgb, var(--bear) 72%, white));
+}
+
+.access-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.95fr) minmax(0, 0.82fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.access-note-card {
+  height: 100%;
+  align-content: start;
+  background:
+    radial-gradient(circle at top right, var(--citrus-glow), transparent 42%),
+    linear-gradient(180deg, var(--surface-card), var(--surface-tile));
 }
 
 /* ----------------------------- Empty state ----------------------------- */
@@ -1686,89 +2254,7 @@ button[data-busy="true"] .button-label {
   font-size: 0.84rem;
 }
 
-/* ----------------------------- Concept ribbon + learning ----------------------------- */
-
-.concept-ribbon {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.concept-chip {
-  border: 1px solid var(--hairline);
-  border-radius: 12px;
-  padding: 11px 14px;
-  background: var(--surface-card);
-  color: var(--text);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  letter-spacing: 0.04em;
-  text-align: left;
-  transition:
-    transform var(--motion-fast) var(--ease-out),
-    border-color var(--motion-base) var(--ease-out),
-    background var(--motion-base) var(--ease-out),
-    color var(--motion-base) var(--ease-out);
-}
-
-.concept-chip:hover,
-.concept-chip:focus-visible {
-  border-color: var(--text-faint);
-  background: var(--surface-card-hover);
-  transform: translateY(-1px);
-  outline: none;
-}
-
-.concept-chip.is-active {
-  border-color: var(--citrus-mid-border);
-  color: var(--citrus-text);
-  background: var(--citrus-tile-bg);
-}
-
-.tooltip-preview {
-  min-height: 56px;
-  border-radius: 14px;
-  padding: 16px 18px;
-  background: var(--surface-tooltip);
-  border: 1px solid var(--surface-tooltip-border);
-  color: var(--text);
-  margin-bottom: 18px;
-  font-family: var(--font-display);
-  font-style: italic;
-  font-size: 1.02rem;
-  line-height: 1.5;
-  font-variation-settings: "opsz" 14;
-  transition: background var(--motion-base) var(--ease-out);
-}
-
-.info-badge {
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  border: 1px solid var(--hairline-strong);
-  background: var(--surface-card);
-  color: var(--text);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition:
-    transform var(--motion-fast) var(--ease-spring),
-    border-color var(--motion-base) var(--ease-out),
-    color var(--motion-base) var(--ease-out);
-}
-
-.info-badge:hover,
-.info-badge:focus-visible {
-  transform: scale(1.08);
-  border-color: var(--citrus-deep);
-  color: var(--citrus-text);
-  outline: none;
-}
+/* ----------------------------- Learning ----------------------------- */
 
 .learning-grid {
   display: grid;
@@ -2393,6 +2879,9 @@ body.is-booting .radar-grid > .radar-card:nth-child(6) { animation-delay: 340ms;
   .earnings-shell,
   .howto-hero,
   .howto-rail,
+  .access-grid,
+  .portfolio-hero,
+  .portfolio-load-grid,
   .analysis-form,
   .profile-form,
   .portfolio-import-form,
@@ -2414,6 +2903,17 @@ body.is-booting .radar-grid > .radar-card:nth-child(6) { animation-delay: 340ms;
 
   .learning-toolbar-shell {
     grid-template-columns: 1fr;
+  }
+
+  .portfolio-subpanel-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .portfolio-section-head,
+  .access-card-head {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .radar-panel { order: 2; }
@@ -2440,6 +2940,11 @@ body.is-booting .radar-grid > .radar-card:nth-child(6) { animation-delay: 340ms;
     flex-direction: row;
     gap: 12px;
     flex-wrap: wrap;
+  }
+
+  .masthead-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .masthead-mark {
@@ -2486,10 +2991,26 @@ body.is-booting .radar-grid > .radar-card:nth-child(6) { animation-delay: 340ms;
     padding-bottom: 2px;
   }
 
+  .access-overlay.surface-stack {
+    padding: 18px;
+  }
+
+  .portfolio-view-tabs {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
   .horizon-pill,
   .mode-pill { flex: 1 1 0; text-align: center; }
 
   .surface-tab {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .portfolio-view-tab {
     flex: 0 0 auto;
     white-space: nowrap;
   }
@@ -2521,7 +3042,6 @@ body.is-booting .radar-grid > .radar-card:nth-child(6) { animation-delay: 340ms;
   .learning-grid,
   .howto-grid,
   .howto-rail,
-  .concept-ribbon,
   .trading-roadmap {
     grid-template-columns: 1fr;
   }
@@ -2544,6 +3064,15 @@ body.is-booting .radar-grid > .radar-card:nth-child(6) { animation-delay: 340ms;
   .holding-head,
   .profile-summary { grid-template-columns: 1fr; }
   .holding-actions { justify-items: start; }
+  .account-card-actions { flex-direction: column; align-items: stretch; }
+  .account-shortcut { min-width: 0; flex: 1 1 auto; }
+  .quick-card-head { align-items: flex-start; }
+  .portfolio-load-card,
+  .auth-card { padding: 20px; }
+  .access-overlay .access-panel {
+    width: min(100vw - 24px, 100%);
+    max-height: calc(100vh - 24px);
+  }
 }
 
 @media (max-width: 480px) {
@@ -2567,6 +3096,14 @@ body.is-booting .radar-grid > .radar-card:nth-child(6) { animation-delay: 340ms;
 
   .theme-pill-label {
     display: none;
+  }
+
+  .account-shortcut {
+    padding-inline: 12px;
+  }
+
+  .account-shortcut-label {
+    font-size: 0.94rem;
   }
 }
 

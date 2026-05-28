@@ -112,7 +112,10 @@ app.add_middleware(
 # innermost-first, so attaching this **after** CORS means it logs every HTTP
 # request (including CORS preflights).
 from .logging_config import (  # noqa: E402
+    auth_failure_retry_after,
+    clear_auth_failures,
     install_request_logging,
+    record_auth_failure,
     rate_limit,
 )
 
@@ -133,7 +136,6 @@ configure_logger().info(
 )
 
 # Rate limit dependencies — declared once so the same instances are reused.
-LOGIN_RATE_LIMIT = rate_limit(key="auth_login", max_hits=5, window_seconds=15 * 60)
 REGISTER_RATE_LIMIT = rate_limit(key="auth_register", max_hits=3, window_seconds=60 * 60)
 ANALYZE_RATE_LIMIT = rate_limit(key="analyze", max_hits=30, window_seconds=60)
 
@@ -238,13 +240,35 @@ def register(request: RegisterRequest) -> SessionResponse:
 @app.post(
     "/auth/login",
     response_model=SessionResponse,
-    dependencies=[Depends(LOGIN_RATE_LIMIT)],
 )
-def login(request: LoginRequest) -> SessionResponse:
+def login(request: LoginRequest, http_request: Request) -> SessionResponse:
+    retry_after = auth_failure_retry_after(
+        key="auth_login_failed",
+        request=http_request,
+        subject=request.username,
+        max_hits=5,
+        window_seconds=15 * 60,
+    )
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit excedido. Volve a intentar en unos segundos.",
+            headers={"Retry-After": str(retry_after)},
+        )
     try:
         session = identity_service.login_user(request.username, request.password)
     except IdentityError as exc:
+        record_auth_failure(
+            key="auth_login_failed",
+            request=http_request,
+            subject=request.username,
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    clear_auth_failures(
+        key="auth_login_failed",
+        request=http_request,
+        subject=request.username,
+    )
     return SessionResponse(
         access_token=session.access_token,
         expires_at=session.expires_at,

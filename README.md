@@ -21,11 +21,26 @@ Workspace de analisis para inversores ARG con:
 ## Desarrollo local
 
 ```bash
-python3 -m uvicorn services.api.app:app --host 0.0.0.0 --reload
+./scripts/run_workspace.sh
 ```
 
+Con el `.env` default:
+
+- modo: `local`
 - app local: `http://127.0.0.1:8000/app/`
 - docs API: `http://127.0.0.1:8000/docs`
+
+Variables clave en `.env`:
+
+- `MARKET_BOT_RUNTIME_MODE=local|host`
+- `MARKET_BOT_LOCAL_BACKEND_HOST`
+- `MARKET_BOT_LOCAL_BACKEND_PORT`
+- `MARKET_BOT_HOSTED_API_BASE`
+
+Comportamiento:
+
+- `local`: levanta FastAPI local y sirve frontend + backend desde el mismo origen.
+- `host`: sirve el frontend local por `http.server` pero apuntando al backend remoto configurado en `MARKET_BOT_HOSTED_API_BASE`.
 
 ## Tests
 

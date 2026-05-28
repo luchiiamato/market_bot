@@ -5,11 +5,17 @@
 //    `config.js` with the production API origin). Empty string = unset.
 // 4. window.location.origin     — same-origin (works for local FastAPI
 //    serving the prototype at /app/)
-// 5. localhost fallback for `file://` and other edge cases.
+// 5. window.MARKET_BOT_LOCAL_API_BASE — local backend target from `.env`
+// 6. localhost fallback for `file://` and other edge cases.
+const localApiBase =
+  typeof window.MARKET_BOT_LOCAL_API_BASE === "string" && window.MARKET_BOT_LOCAL_API_BASE.trim()
+    ? window.MARKET_BOT_LOCAL_API_BASE.trim().replace(/\/$/, "")
+    : "http://127.0.0.1:8000";
+
 const defaultApiBase =
   window.location.origin && window.location.origin !== "null"
     ? window.location.origin
-    : "http://127.0.0.1:8000";
+    : localApiBase;
 
 const _injectedApiBase =
   typeof window.MARKET_BOT_API_BASE === "string" && window.MARKET_BOT_API_BASE.trim()
@@ -314,24 +320,6 @@ const GLOSSARY_TERMS = [
   }
 ];
 
-const FEATURED_TERM_IDS = new Set([
-  "rsi",
-  "macd",
-  "adx",
-  "atr",
-  "long",
-  "short",
-  "call",
-  "put",
-  "cedear",
-  "mep",
-  "ccl",
-  "vix",
-  "stop-loss",
-  "earnings",
-  "probability-up"
-]);
-
 const state = {
   ticker: "AAPL",
   horizon: "short",
@@ -343,13 +331,25 @@ const state = {
   accessToken: window.localStorage.getItem(AUTH_TOKEN_KEY),
   profile: null,
   instrumentType: "cedear",
+  miniSummaryCurrency: "ARS",
   portfolioSummary: null,
+  portfolioView: "summary",
   activeSurface: "workspace",
+  lastTabbedSurface: "workspace",
   analysisRequestId: 0
 };
 
 const elements = {
   body: document.body,
+  accountShortcut: document.querySelector("#account-shortcut"),
+  accountShortcutKicker: document.querySelector("#account-shortcut-kicker"),
+  accountShortcutLabel: document.querySelector("#account-shortcut-label"),
+  accountCardTitle: document.querySelector("#account-card-title"),
+  accountCardChip: document.querySelector("#account-card-chip"),
+  accountCardCopy: document.querySelector("#account-card-copy"),
+  openAccountButton: document.querySelector("#open-account-button"),
+  openPortfolioButton: document.querySelector("#open-portfolio-button"),
+  miniSummaryCurrencyButtons: Array.from(document.querySelectorAll("[data-mini-summary-currency]")),
   form: document.querySelector("#analysis-form"),
   tickerInput: document.querySelector("#ticker-input"),
   radarGrid: document.querySelector("#radar-grid"),
@@ -384,12 +384,14 @@ const elements = {
   datalist: document.querySelector("#ticker-suggestions"),
   horizonButtons: Array.from(document.querySelectorAll(".horizon-pill")),
   surfaceButtons: Array.from(document.querySelectorAll("[data-surface]")),
+  portfolioSurfaceButton: document.querySelector('[data-surface="portfolio"]'),
   workspaceSurface: document.querySelector("#surface-workspace"),
+  portfolioSurface: document.querySelector("#surface-portfolio"),
   howtoSurface: document.querySelector("#surface-howto"),
   learningSurface: document.querySelector("#surface-learning"),
   tradingSurface: document.querySelector("#surface-trading"),
-  conceptRibbon: document.querySelector("#concept-ribbon"),
-  tooltipPreview: document.querySelector("#tooltip-preview"),
+  accessSurface: document.querySelector("#surface-access"),
+  accessPanel: document.querySelector(".access-panel"),
   learningSearchInput: document.querySelector("#learning-search-input"),
   learningSearchClear: document.querySelector("#learning-search-clear"),
   learningFilters: document.querySelector("#learning-filters"),
@@ -417,6 +419,12 @@ const elements = {
   miniSummaryGrid: document.querySelector("#mini-summary-grid"),
   portfolioLockedState: document.querySelector("#portfolio-locked-state"),
   portfolioShell: document.querySelector("#portfolio-shell"),
+  portfolioViewButtons: Array.from(document.querySelectorAll("[data-portfolio-view-tab]")),
+  portfolioViewSummary: document.querySelector("#portfolio-view-summary"),
+  portfolioViewLoad: document.querySelector("#portfolio-view-load"),
+  portfolioViewHoldings: document.querySelector("#portfolio-view-holdings"),
+  portfolioEmptySummary: document.querySelector("#portfolio-empty-summary"),
+  portfolioEmptyHoldings: document.querySelector("#portfolio-empty-holdings"),
   portfolioImportForm: document.querySelector("#portfolio-import-form"),
   portfolioImportFile: document.querySelector("#portfolio-import-file"),
   portfolioImportReplace: document.querySelector("#portfolio-import-replace"),
@@ -435,7 +443,8 @@ const elements = {
   portfolioSummaryGrid: document.querySelector("#portfolio-summary-grid"),
   holdingsGrid: document.querySelector("#holdings-grid"),
   benchmarkPanel: document.querySelector("#benchmark-panel"),
-  benchmarkBars: document.querySelector("#benchmark-bars")
+  benchmarkBars: document.querySelector("#benchmark-bars"),
+  closeAccountButton: document.querySelector("#close-account-button")
 };
 
 function titleCaseHorizon(horizon) {
@@ -463,6 +472,31 @@ function setPortfolioImportStatus(message) {
   elements.portfolioImportStatus.textContent = message;
 }
 
+function renderAccountChrome() {
+  const loggedIn = Boolean(state.profile && state.accessToken);
+  if (!loggedIn) {
+    elements.accountShortcutKicker.textContent = "Guest";
+    elements.accountShortcutLabel.textContent = "Login";
+    elements.accountCardTitle.textContent = "Entrá o registrate";
+    elements.accountCardChip.textContent = "Guest";
+    elements.accountCardCopy.textContent = "El acceso vive aparte del landing. Primero creás tu usuario local y recién ahí se habilita portfolio, benchmarks y positions tracking.";
+    elements.openAccountButton.querySelector(".button-label").textContent = "Ir a login";
+    elements.openPortfolioButton.textContent = "Crear cuenta";
+    elements.openPortfolioButton.setAttribute("aria-label", "Crear cuenta");
+    return;
+  }
+
+  const displayName = state.profile.display_name || state.profile.username;
+  elements.accountShortcutKicker.textContent = "Settings";
+  elements.accountShortcutLabel.textContent = `@${state.profile.username}`;
+  elements.accountCardTitle.textContent = displayName;
+  elements.accountCardChip.textContent = state.profile.risk_tolerance.toUpperCase();
+  elements.accountCardCopy.textContent = `${toHeadline(state.profile.investor_profile)} · ${toHeadline(state.profile.preferred_horizon)} · Benchmark ${state.profile.benchmark_preference.toUpperCase()}`;
+  elements.openAccountButton.querySelector(".button-label").textContent = "Abrir settings";
+  elements.openPortfolioButton.textContent = "Ir al portfolio";
+  elements.openPortfolioButton.setAttribute("aria-label", "Ir al portfolio");
+}
+
 function renderContextPlaceholder(target, options) {
   if (!target) return;
   const tone = options.tone || "neutral";
@@ -487,37 +521,103 @@ function setButtonBusy(button, isBusy, busyLabel) {
   }
 }
 
-const SURFACE_ORDER = ["workspace", "howto", "learning", "trading"];
+function surfaceLabel(surface) {
+  const labels = {
+    workspace: "workspace",
+    portfolio: "portfolio",
+    howto: "how to use",
+    learning: "learning",
+    trading: "trading"
+  };
+  return labels[surface] || "workspace";
+}
+
+function accessFocusTarget() {
+  if (state.profile && state.accessToken) {
+    return elements.profileDisplayName;
+  }
+  return state.authMode === "register" ? elements.authDisplayName : elements.authUsername;
+}
+
+const SURFACE_ORDER = ["workspace", "portfolio", "howto", "learning", "trading", "access"];
 
 function setSurface(surface) {
+  if (surface === "portfolio" && !(state.profile && state.accessToken)) {
+    surface = "access";
+    setAuthMode("login");
+  }
   const previousSurface = state.activeSurface;
   state.activeSurface = surface;
+  if (surface !== "access") {
+    state.lastTabbedSurface = surface;
+  }
   const surfaces = {
     workspace: elements.workspaceSurface,
+    portfolio: elements.portfolioSurface,
     howto: elements.howtoSurface,
     learning: elements.learningSurface,
-    trading: elements.tradingSurface
+    trading: elements.tradingSurface,
+    access: elements.accessSurface
   };
 
   // Direction (forward / backward) drives the slide side via CSS.
   // Forward = right-to-left enter; backward = left-to-right enter.
   const slider = document.querySelector(".surface-slider");
+  const previousBaseSurface = previousSurface === "access" ? state.lastTabbedSurface : (previousSurface || "workspace");
+  const activeBaseSurface = surface === "access" ? state.lastTabbedSurface : surface;
   if (slider) {
-    const fromIndex = SURFACE_ORDER.indexOf(previousSurface || "workspace");
-    const toIndex = SURFACE_ORDER.indexOf(surface);
+    const fromIndex = SURFACE_ORDER.indexOf(previousBaseSurface || "workspace");
+    const toIndex = SURFACE_ORDER.indexOf(activeBaseSurface || "workspace");
     const direction = toIndex >= fromIndex ? "forward" : "backward";
     slider.setAttribute("data-direction", direction);
-    slider.setAttribute("data-active-surface", surface);
+    slider.setAttribute("data-active-surface", activeBaseSurface);
   }
 
   Object.entries(surfaces).forEach(([key, node]) => {
     if (!node) return;
+    const isActive = key === "access" ? surface === "access" : key === activeBaseSurface;
     // Active swap via opacity/transform (no display:none), so revealing
     // animations don't restart and the swap takes ~200ms instead of ~1s.
-    node.classList.toggle("is-active", key === surface);
+    node.classList.toggle("is-active", isActive);
   });
+  const selectedTabSurface = surface === "access" ? state.lastTabbedSurface : surface;
   elements.surfaceButtons.forEach((button) => {
-    const isSelected = button.dataset.surface === surface;
+    const isSelected = button.dataset.surface === selectedTabSurface;
+    button.classList.toggle("is-selected", isSelected);
+    button.setAttribute("aria-selected", isSelected ? "true" : "false");
+  });
+  if (elements.accountShortcut) {
+    elements.accountShortcut.classList.toggle("is-active", surface === "access");
+    elements.accountShortcut.setAttribute("aria-pressed", surface === "access" ? "true" : "false");
+  }
+  if (elements.closeAccountButton) {
+    elements.closeAccountButton.textContent = `Volver a ${surfaceLabel(state.lastTabbedSurface)}`;
+  }
+  elements.body.dataset.overlay = surface === "access" ? "access" : "none";
+  if (surface === "access") {
+    window.requestAnimationFrame(() => {
+      const focusTarget = accessFocusTarget();
+      if (focusTarget) {
+        focusTarget.focus();
+      }
+    });
+  }
+}
+
+function setPortfolioView(view) {
+  state.portfolioView = view;
+  const views = {
+    summary: elements.portfolioViewSummary,
+    load: elements.portfolioViewLoad,
+    holdings: elements.portfolioViewHoldings
+  };
+
+  Object.entries(views).forEach(([key, node]) => {
+    if (!node) return;
+    node.classList.toggle("is-active", key === view);
+  });
+  elements.portfolioViewButtons.forEach((button) => {
+    const isSelected = button.dataset.portfolioViewTab === view;
     button.classList.toggle("is-selected", isSelected);
     button.setAttribute("aria-selected", isSelected ? "true" : "false");
   });
@@ -612,7 +712,6 @@ function matchesLearningQuery(term, query) {
 }
 
 function renderGlossary() {
-  const featuredTerms = GLOSSARY_TERMS.filter((term) => FEATURED_TERM_IDS.has(term.id));
   const categories = glossaryCategories();
   const categoryTerms = state.learningFilter === "all"
     ? GLOSSARY_TERMS
@@ -622,19 +721,6 @@ function renderGlossary() {
   GLOSSARY_TERMS.forEach((term) => {
     categoryCounts.set(term.category, (categoryCounts.get(term.category) || 0) + 1);
   });
-
-  elements.conceptRibbon.innerHTML = featuredTerms.map(
-    (term) => `
-      <button
-        type="button"
-        class="concept-chip"
-        data-term-id="${term.id}"
-        aria-describedby="tooltip-preview"
-      >
-        <span>${term.label}</span>
-      </button>
-    `
-  ).join("");
 
   elements.learningFilters.innerHTML = [
     { key: "all", label: "Todos", count: GLOSSARY_TERMS.length },
@@ -686,12 +772,6 @@ function renderGlossary() {
             <p class="analysis-kicker">${highlightLearningText(term.category, state.learningQuery)}</p>
             <h3>${highlightLearningText(term.label, state.learningQuery)}</h3>
           </div>
-          <button
-            type="button"
-            class="info-badge"
-            data-term-id="${term.id}"
-            aria-label="Explicación rápida de ${term.label}"
-          >?</button>
         </div>
         <p class="learning-short">${highlightLearningText(term.short, state.learningQuery)}</p>
         <p class="learning-detail">${highlightLearningText(term.detail, state.learningQuery)}</p>
@@ -700,32 +780,14 @@ function renderGlossary() {
   ).join("");
 }
 
-function showTerm(termId) {
-  const term = GLOSSARY_TERMS.find((item) => item.id === termId);
-  if (!term) return;
-  elements.tooltipPreview.textContent = `${term.label}: ${term.short}`;
-  document.querySelectorAll("[data-term-id]").forEach((node) => {
-    node.classList.toggle("is-active", node.dataset.termId === termId);
-  });
-}
-
-function clearTermPreview() {
-  elements.tooltipPreview.textContent = "Pasá por un concepto para ver una explicación rápida.";
-  document.querySelectorAll("[data-term-id].is-active").forEach((node) => {
-    node.classList.remove("is-active");
-  });
-}
-
 function setLearningFilter(filter) {
   state.learningFilter = filter;
   renderGlossary();
-  clearTermPreview();
 }
 
 function setLearningQuery(query) {
   state.learningQuery = String(query || "");
   renderGlossary();
-  clearTermPreview();
 }
 
 function authHeaders(required = false) {
@@ -736,6 +798,27 @@ function authHeaders(required = false) {
     return {};
   }
   return { Authorization: `Bearer ${state.accessToken}` };
+}
+
+function formatErrorDetail(detail) {
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object") {
+          const path = Array.isArray(item.loc) ? item.loc.slice(1).join(".") : "";
+          const message = item.msg || item.message || JSON.stringify(item);
+          return path ? `${path}: ${message}` : String(message);
+        }
+        return String(item);
+      })
+      .filter(Boolean);
+    return messages.join(" · ");
+  }
+  if (detail && typeof detail === "object") {
+    return detail.detail || detail.message || JSON.stringify(detail);
+  }
+  return String(detail);
 }
 
 async function fetchJson(path, options = {}) {
@@ -753,7 +836,7 @@ async function fetchJson(path, options = {}) {
     let detail = `Error ${response.status}`;
     try {
       const body = await response.json();
-      detail = body.detail || detail;
+      detail = body && "detail" in body ? formatErrorDetail(body.detail) : detail;
     } catch (error) {
       // Ignore invalid JSON on error paths.
     }
@@ -786,6 +869,7 @@ function setAuthMode(mode) {
     ? "Creá tu usuario local para guardar portfolio"
     : "Ingresá para guardar perfil y portfolio";
   elements.authDisplayNameWrap.classList.toggle("is-hidden", !isRegister);
+  elements.authPassword.setAttribute("autocomplete", isRegister ? "new-password" : "current-password");
   elements.authModeButtons.forEach((button) => {
     const isSelected = button.dataset.authMode === mode;
     button.classList.toggle("is-selected", isSelected);
@@ -798,12 +882,39 @@ function setAuthMode(mode) {
   }
 }
 
+function updatePortfolioAccessState() {
+  const loggedIn = Boolean(state.profile && state.accessToken);
+  if (elements.portfolioSurfaceButton) {
+    elements.portfolioSurfaceButton.classList.toggle("is-hidden", !loggedIn);
+  }
+  if (!loggedIn && state.activeSurface === "portfolio") {
+    setSurface("workspace");
+  }
+  if (!loggedIn && state.lastTabbedSurface === "portfolio") {
+    state.lastTabbedSurface = "workspace";
+  }
+}
+
+function setMiniSummaryCurrency(currency) {
+  state.miniSummaryCurrency = currency === "USD" ? "USD" : "ARS";
+  elements.miniSummaryCurrencyButtons.forEach((button) => {
+    const isSelected = button.dataset.miniSummaryCurrency === state.miniSummaryCurrency;
+    button.classList.toggle("is-selected", isSelected);
+    button.setAttribute("aria-selected", isSelected ? "true" : "false");
+  });
+  renderMiniSummary(state.portfolioSummary);
+}
+
 function renderUnauthenticated() {
+  updatePortfolioAccessState();
   elements.body.dataset.loggedIn = "false";
   elements.authForm.classList.remove("is-hidden");
   elements.profileShell.classList.add("is-hidden");
   elements.portfolioLockedState.classList.remove("is-hidden");
   elements.portfolioShell.classList.add("is-hidden");
+  elements.portfolioEmptySummary.classList.add("is-hidden");
+  elements.portfolioEmptyHoldings.classList.add("is-hidden");
+  setPortfolioView("summary");
   if (elements.benchmarkPanel) {
     elements.benchmarkPanel.classList.add("is-hidden");
   }
@@ -823,6 +934,7 @@ function renderUnauthenticated() {
   elements.portfolioSummaryGrid.innerHTML = "";
   elements.holdingsGrid.innerHTML = "";
   renderPortfolioEarningsLocked();
+  renderAccountChrome();
   setAuthStatus("Podés entrar o registrarte sin mail.");
   setPortfolioImportStatus("Iniciá sesión para importar tu extracto de Balanz.");
 }
@@ -838,12 +950,14 @@ function hydrateProfile(profile) {
 }
 
 function renderAuthenticated() {
+  updatePortfolioAccessState();
   elements.body.dataset.loggedIn = "true";
   elements.authForm.classList.add("is-hidden");
   elements.profileShell.classList.remove("is-hidden");
   elements.portfolioLockedState.classList.add("is-hidden");
   elements.portfolioShell.classList.remove("is-hidden");
   hydrateProfile(state.profile);
+  renderAccountChrome();
   setAuthStatus(`Sesión activa para ${state.profile.username}.`);
   setPortfolioImportStatus("Podés importar un extracto de Balanz o seguir cargando posiciones manualmente.");
 }
@@ -863,9 +977,14 @@ function renderMiniSummary(summary) {
     return;
   }
 
+  const pnlLabel = state.miniSummaryCurrency === "USD" ? "P&amp;L USD" : "P&amp;L ARS";
+  const pnlValue = state.miniSummaryCurrency === "USD"
+    ? formatCurrency(summary.total_pnl_usd, "USD")
+    : formatCurrency(summary.total_pnl_ars, "ARS");
+
   elements.miniSummaryGrid.innerHTML = [
     ["Posiciones", summary.positions_count],
-    ["P&amp;L ARS", formatCurrency(summary.total_pnl_ars, "ARS")]
+    [pnlLabel, pnlValue]
   ]
     .map(
       ([label, value]) => `
@@ -878,7 +997,66 @@ function renderMiniSummary(summary) {
     .join("");
 }
 
-async function bootstrapSession() {
+function renderWorkspaceIdle() {
+  elements.workspaceTitle.textContent = `Ticker seleccionado: ${state.ticker}`;
+  elements.marketChip.textContent = `${titleCaseHorizon(state.horizon)} · Radar listo`;
+  elements.verdictGrid.innerHTML = `
+    <article class="verdict-card">
+      <p class="analysis-kicker">Estado</p>
+      <div class="verdict-value neutral">Listo</div>
+    </article>
+    <article class="verdict-card">
+      <p class="analysis-kicker">Siguiente paso</p>
+      <div class="verdict-value neutral">Elegí un ticker</div>
+    </article>
+  `;
+  elements.deterministicTitle.textContent = "Todavía no corriste el análisis.";
+  elements.deterministicReasons.innerHTML = "<li>Elegí una card del radar o escribí un ticker para disparar el motor completo.</li>";
+  elements.probabilisticTitle.textContent = "El análisis probabilístico aparece cuando corrés un ticker.";
+  elements.scenarioStack.innerHTML = "";
+  elements.probabilisticWarnings.innerHTML = "";
+  elements.validationTitle.textContent = "Sin validación para mostrar";
+  elements.validationGrid.innerHTML = "";
+  elements.backtestTitle.textContent = "Sin backtest para mostrar";
+  elements.backtestGrid.innerHTML = "";
+  elements.actionMatrix.innerHTML = `
+    <button type="button" class="action-tile is-primary">
+      <div class="verdict-stat">
+        <strong class="neutral">Seleccionar</strong>
+        <span class="tone-chip">Radar</span>
+      </div>
+      <p>Usá el ranking de arriba o el buscador para correr el análisis consolidado.</p>
+    </button>
+  `;
+  elements.catalystList.innerHTML = "<li>Los catalysts aparecen una vez que elijas un ticker.</li>";
+  elements.guardrailList.innerHTML = "<li>Los guardrails se calculan junto con el análisis.</li>";
+  renderContextPlaceholder(elements.marketOverviewGrid, {
+    title: "Market regime en espera",
+    body: "Se carga cuando analizás un ticker.",
+    tone: "neutral"
+  });
+  elements.marketOverviewTitle.textContent = "Tape general en espera";
+  elements.marketOverviewChip.textContent = "Idle";
+  elements.marketOverviewSummary.textContent = "No corremos contexto externo hasta que elijas un activo para mantener el primer render ágil.";
+  elements.marketOverviewWarnings.innerHTML = "";
+  renderContextPlaceholder(elements.newsFeed, {
+    title: "News tape en espera",
+    body: "Los titulares llegan cuando dispares el análisis.",
+    tone: "neutral"
+  });
+  elements.newsTitle.textContent = "Sin titulares cargados";
+  elements.newsChip.textContent = "Idle";
+  renderContextPlaceholder(elements.tickerEarningsFeed, {
+    title: "Earnings en espera",
+    body: "El calendario del ticker se consulta recién cuando elegís un activo.",
+    tone: "neutral"
+  });
+  elements.earningsTitle.textContent = "Sin calendario cargado";
+  syncSelection();
+}
+
+async function bootstrapSession(options = {}) {
+  const { refreshRankings = true } = options;
   if (!state.accessToken) {
     renderUnauthenticated();
     return;
@@ -888,7 +1066,9 @@ async function bootstrapSession() {
     const profile = await fetchJson("/profile", { auth: true });
     state.profile = profile;
     renderAuthenticated();
-    await loadRankings();
+    if (refreshRankings) {
+      await loadRankings();
+    }
     await loadPortfolioSummary();
   } catch (error) {
     clearSession();
@@ -907,6 +1087,17 @@ async function handleAuthSubmit(event) {
     payload.display_name = elements.authDisplayName.value.trim() || payload.username;
   }
 
+  if (payload.username.length < 3) {
+    setAuthStatus("El username necesita al menos 3 caracteres.");
+    elements.authUsername.focus();
+    return;
+  }
+  if (payload.password.length < 6) {
+    setAuthStatus("La password necesita al menos 6 caracteres.");
+    elements.authPassword.focus();
+    return;
+  }
+
   setButtonBusy(elements.authSubmit, true, state.authMode === "register" ? "Creando..." : "Ingresando...");
   try {
     const path = state.authMode === "register" ? "/auth/register" : "/auth/login";
@@ -916,10 +1107,13 @@ async function handleAuthSubmit(event) {
     });
     persistSession(session);
     renderAuthenticated();
-    await loadRankings();
-    await loadPortfolioSummary();
+    setPortfolioView("summary");
+    setSurface("portfolio");
     setAuthStatus(state.authMode === "register" ? "Usuario creado y sesión iniciada." : "Sesión iniciada.");
     elements.authPassword.value = "";
+    Promise.allSettled([loadRankings(), loadPortfolioSummary()]).catch(() => {
+      // Individual loaders already publish their own UI errors.
+    });
   } catch (error) {
     setAuthStatus(`No se pudo completar el acceso: ${error.message}`);
   } finally {
@@ -968,6 +1162,7 @@ async function handleLogout() {
   clearSession();
   renderUnauthenticated();
   await loadRankings();
+  setSurface("workspace");
 }
 
 function setInstrumentType(type) {
@@ -1005,6 +1200,17 @@ async function loadPortfolioSummary() {
 }
 
 function renderPortfolioSummary(summary) {
+  if (!summary.positions_count) {
+    elements.portfolioEmptySummary.classList.remove("is-hidden");
+    elements.portfolioEmptyHoldings.classList.remove("is-hidden");
+    elements.portfolioSummaryGrid.innerHTML = "";
+    elements.holdingsGrid.innerHTML = "";
+    renderBenchmarkBars(summary);
+    return;
+  }
+
+  elements.portfolioEmptySummary.classList.add("is-hidden");
+  elements.portfolioEmptyHoldings.classList.add("is-hidden");
   elements.portfolioSummaryGrid.innerHTML = [
     ["Posiciones", summary.positions_count],
     ["Valor ARS", formatCurrency(summary.total_value_ars, "ARS")],
@@ -1022,17 +1228,6 @@ function renderPortfolioSummary(summary) {
       `
     )
     .join("");
-
-  if (!summary.positions_count) {
-    elements.holdingsGrid.innerHTML = `
-      <div class="empty-state">
-        <strong>No tenés posiciones cargadas.</strong>
-        <p>Probá agregar un CEDEAR o un stock desde el formulario de arriba.</p>
-      </div>
-    `;
-    renderBenchmarkBars(summary);
-    return;
-  }
 
   renderBenchmarkBars(summary);
 
@@ -1145,45 +1340,67 @@ function renderBenchmarkBars(summary) {
         key: label,
         label: BENCHMARK_LABELS[label],
         valueArs: trackedArs,
+        deltaArs: outArs,
         outperformancePct: outPct,
         tone: outArs >= 0 ? "bull" : "bear"
       };
-    });
-
-  const rows = [
-    ...benchmarkRows,
-    {
-      key: "__portfolio__",
-      label: "Mi portfolio",
-      valueArs: portfolioArs,
-      outperformancePct: null,
-      tone: "paper"
-    }
-  ];
-
-  const maxValue = rows.reduce((acc, row) => Math.max(acc, Math.abs(row.valueArs)), 0) || 1;
+    })
+    .sort((left, right) => right.outperformancePct - left.outperformancePct);
 
   elements.benchmarkPanel.classList.remove("is-hidden");
-  elements.benchmarkBars.innerHTML = rows
+  elements.benchmarkBars.innerHTML = `
+    <article class="benchmark-spotlight">
+      <div>
+        <p class="analysis-kicker">Mi portfolio</p>
+        <h4>Valor actual consolidado</h4>
+      </div>
+      <div class="benchmark-spotlight-value">${formatCurrency(portfolioArs, "ARS")}</div>
+      <p class="benchmark-spotlight-copy">Tomamos este valor como base para comparar cuánto le gana o pierde tu cartera frente a cada benchmark argentino.</p>
+    </article>
+    <div class="benchmark-comparison-grid">
+      ${benchmarkRows
     .map((row) => {
-      const widthPct = Math.max(2, (Math.abs(row.valueArs) / maxValue) * 100);
-      const outChip = row.outperformancePct !== null
-        ? `<span class="benchmark-out ${row.tone}">${formatPercent(row.outperformancePct)}</span>`
-        : `<span class="benchmark-out paper">Tu valor</span>`;
+      const pairMax = Math.max(Math.abs(row.valueArs), Math.abs(portfolioArs), 1);
+      const benchmarkWidth = Math.max(12, (Math.abs(row.valueArs) / pairMax) * 100);
+      const portfolioWidth = Math.max(12, (Math.abs(portfolioArs) / pairMax) * 100);
+      const toneLabel = row.tone === "bull" ? "Le gana" : "Pierde";
+      const deltaCopy = row.deltaArs >= 0
+        ? `Tu portfolio le gana por ${formatCurrency(Math.abs(row.deltaArs), "ARS")}.`
+        : `Tu portfolio queda abajo por ${formatCurrency(Math.abs(row.deltaArs), "ARS")}.`;
       return `
-        <div class="benchmark-row" data-row="${escapeText(row.key)}">
-          <div class="benchmark-meta">
-            <span class="benchmark-label">${escapeText(row.label)}</span>
-            <span class="benchmark-value">${formatCurrency(row.valueArs, "ARS")}</span>
+        <article class="benchmark-card ${row.tone}" data-row="${escapeText(row.key)}">
+          <div class="benchmark-card-top">
+            <span class="tone-chip">${escapeText(row.label)}</span>
+            <span class="benchmark-delta ${row.tone}">${formatPercent(row.outperformancePct)}</span>
           </div>
-          <div class="benchmark-track" role="presentation">
-            <div class="benchmark-fill ${row.tone}" style="width:${widthPct.toFixed(2)}%"></div>
+          <div class="benchmark-card-value">${formatCurrency(row.valueArs, "ARS")}</div>
+          <p class="benchmark-card-copy">${toneLabel} · ${deltaCopy}</p>
+          <div class="benchmark-meter-group">
+            <div class="benchmark-meter">
+              <div class="benchmark-meter-meta">
+                <span>Benchmark</span>
+                <strong>${formatCurrency(row.valueArs, "ARS")}</strong>
+              </div>
+              <div class="benchmark-meter-track" role="presentation">
+                <div class="benchmark-meter-fill benchmark" style="width:${benchmarkWidth.toFixed(2)}%"></div>
+              </div>
+            </div>
+            <div class="benchmark-meter">
+              <div class="benchmark-meter-meta">
+                <span>Portfolio</span>
+                <strong>${formatCurrency(portfolioArs, "ARS")}</strong>
+              </div>
+              <div class="benchmark-meter-track" role="presentation">
+                <div class="benchmark-meter-fill portfolio ${row.tone}" style="width:${portfolioWidth.toFixed(2)}%"></div>
+              </div>
+            </div>
           </div>
-          ${outChip}
-        </div>
+        </article>
       `;
     })
-    .join("");
+    .join("")}
+    </div>
+  `;
 }
 
 function renderPortfolioEarningsLocked() {
@@ -1275,6 +1492,8 @@ async function handlePortfolioSubmit(event) {
     elements.portfolioForm.reset();
     setInstrumentType("cedear");
     await loadPortfolioSummary();
+    setPortfolioView("summary");
+    setSurface("portfolio");
     setPortfolioStatus("Posición guardada.");
   } catch (error) {
     setPortfolioStatus(`No se pudo guardar la posición: ${error.message}`);
@@ -1330,6 +1549,8 @@ async function handlePortfolioImportSubmit(event) {
       : "";
     elements.portfolioImportForm.reset();
     await loadPortfolioSummary();
+    setPortfolioView("summary");
+    setSurface("portfolio");
     setPortfolioImportStatus(
       `Importación lista desde ${result.source_sheet}: ${result.imported_count} posiciones agregadas, ${result.skipped_count} salteadas.${skippedPreview}`
     );
@@ -1991,11 +2212,31 @@ elements.surfaceButtons.forEach((button) => {
   button.addEventListener("click", () => setSurface(button.dataset.surface));
 });
 
+elements.accountShortcut.addEventListener("click", () => setSurface("access"));
+elements.openAccountButton.addEventListener("click", () => setSurface("access"));
+elements.openPortfolioButton.addEventListener("click", () => {
+  if (state.profile && state.accessToken) {
+    setSurface("portfolio");
+    return;
+  }
+  setAuthMode("register");
+  setSurface("access");
+});
+elements.closeAccountButton.addEventListener("click", () => setSurface(state.lastTabbedSurface || "workspace"));
+elements.accessSurface.addEventListener("click", (event) => {
+  if (event.target !== elements.accessSurface) return;
+  setSurface(state.lastTabbedSurface || "workspace");
+});
+
 elements.authForm.addEventListener("submit", handleAuthSubmit);
 elements.profileForm.addEventListener("submit", handleProfileSubmit);
 elements.logoutButton.addEventListener("click", handleLogout);
 elements.portfolioImportForm.addEventListener("submit", handlePortfolioImportSubmit);
 elements.portfolioForm.addEventListener("submit", handlePortfolioSubmit);
+
+elements.portfolioViewButtons.forEach((button) => {
+  button.addEventListener("click", () => setPortfolioView(button.dataset.portfolioViewTab));
+});
 
 elements.authModeButtons.forEach((button) => {
   button.addEventListener("click", () => setAuthMode(button.dataset.authMode));
@@ -2003,6 +2244,10 @@ elements.authModeButtons.forEach((button) => {
 
 elements.instrumentButtons.forEach((button) => {
   button.addEventListener("click", () => setInstrumentType(button.dataset.instrumentType));
+});
+
+elements.miniSummaryCurrencyButtons.forEach((button) => {
+  button.addEventListener("click", () => setMiniSummaryCurrency(button.dataset.miniSummaryCurrency));
 });
 
 elements.horizonButtons.forEach((button) => {
@@ -2045,36 +2290,19 @@ elements.holdingsGrid.addEventListener("click", (event) => {
   handleDeletePosition(button.dataset.deletePosition);
 });
 
-document.addEventListener("mouseover", (event) => {
-  const trigger = event.target.closest("[data-term-id]");
-  if (!trigger) return;
-  showTerm(trigger.dataset.termId);
-});
-
-document.addEventListener("focusin", (event) => {
-  const trigger = event.target.closest("[data-term-id]");
-  if (!trigger) return;
-  showTerm(trigger.dataset.termId);
-});
-
-document.addEventListener("mouseout", (event) => {
-  const trigger = event.target.closest("[data-term-id]");
-  if (!trigger) return;
-  if (trigger.contains(event.relatedTarget)) return;
-  clearTermPreview();
-});
-
-document.addEventListener("focusout", (event) => {
-  const trigger = event.target.closest("[data-term-id]");
-  if (!trigger) return;
-  if (trigger.contains(event.relatedTarget)) return;
-  clearTermPreview();
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (state.activeSurface !== "access") return;
+  setSurface(state.lastTabbedSurface || "workspace");
 });
 
 async function bootstrap() {
   setAuthMode("login");
   setInstrumentType("cedear");
+  setMiniSummaryCurrency("ARS");
+  setPortfolioView("summary");
   setSurface("workspace");
+  updatePortfolioAccessState();
   renderGlossary();
   renderUnauthenticated();
   setLoading(true);
@@ -2082,10 +2310,13 @@ async function bootstrap() {
 
   try {
     await fetchJson("/health");
-    await loadUniverse();
-    await loadRankings();
-    await analyzeTicker(state.ticker);
-    await bootstrapSession();
+    await Promise.all([
+      loadUniverse(),
+      loadRankings(),
+      bootstrapSession({ refreshRankings: false })
+    ]);
+    renderWorkspaceIdle();
+    setStatus("Elegí un ticker o tocá una card del radar para correr el análisis.");
   } catch (error) {
     renderRadar();
     renderErrorState(state.ticker, error);
