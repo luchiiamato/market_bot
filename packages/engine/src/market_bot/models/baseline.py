@@ -22,6 +22,18 @@ class ProbabilisticOutput:
     validation: ModelValidationSummary
 
 
+# Sprint 9.1: cuántas barras hacia adelante predice el modelo, por horizonte.
+# Antes el target era el PRÓXIMO bar (shift(-1)): para SHORT eso es la próxima
+# HORA (data 1h) = ruido de microestructura, por eso el F1 daba ~azar. Ahora
+# predecimos la dirección del retorno A HORIZONTE, que es lo que el user pide y
+# lo que sí es aprendible. SHORT (1h) ~5 ruedas = 35 barras; LONG (1d) ~20 ruedas.
+_TARGET_HORIZON_BARS = {Horizon.SHORT: 35, Horizon.LONG: 20}
+
+
+def target_horizon_bars(horizon: Horizon) -> int:
+    return _TARGET_HORIZON_BARS.get(horizon, 5)
+
+
 FEATURE_CAP = 5.0
 FEATURE_LABELS = {
     "rsi_centered": "RSI",
@@ -67,10 +79,13 @@ def _generate_validated_signal(
     feature_frame = _build_feature_frame(data)
     current_features = feature_frame.iloc[[-1]].copy()
     training_frame = data.loc[feature_frame.index].copy()
+    # Sprint 9.1: target = dirección del retorno a HORIZONTE (no del próximo bar).
+    horizon_bars = target_horizon_bars(horizon)
     training_frame["target"] = (
-        training_frame["Close"].shift(-1) > training_frame["Close"]
+        training_frame["Close"].shift(-horizon_bars) > training_frame["Close"]
     ).astype(float)
-    modeling_frame = feature_frame.join(training_frame["target"]).iloc[:-1].dropna().copy()
+    # Las últimas `horizon_bars` filas no tienen futuro conocido → dropna las saca.
+    modeling_frame = feature_frame.join(training_frame["target"]).dropna().copy()
 
     if len(modeling_frame) < 180:
         raise ValueError("Muestra insuficiente para validacion temporal estable.")
@@ -157,7 +172,7 @@ def _generate_validated_signal(
         brier_score=round(brier, 3),
         notes=[
             "Se entreno un random forest calibrado con TimeSeriesSplit sobre features normalizadas.",
-            "El target es direccion del proximo cierre respecto del cierre actual.",
+            f"El target es la direccion del retorno a {horizon_bars} barras (horizonte {horizon.value}), no del proximo bar.",
         ],
     )
 

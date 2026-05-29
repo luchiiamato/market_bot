@@ -1,7 +1,7 @@
 // Build stamp — bumped on every UI design pass. Visible at the bottom of the
 // page AND in the console so we can confirm a fresh build is loaded when the
 // user reports "I don't see changes" (usually a cache issue).
-const MARKET_BOT_UI_BUILD = "2026-05-30 · sprint-8 · chat+ratios-fixed";
+const MARKET_BOT_UI_BUILD = "2026-05-29 · sprint-9 · ux-wait+skeleton+toast+mobile";
 console.info(`%cMarket Bot UI build: ${MARKET_BOT_UI_BUILD}`, "color:#c6f25c;font-weight:600");
 document.addEventListener("DOMContentLoaded", function () {
   const mark = document.getElementById("build-mark");
@@ -701,6 +701,15 @@ async function loadDiagnostics() {
   if (elements.diagnosticsStatus) {
     elements.diagnosticsStatus.textContent = "Pidiendo precios crudos al backend…";
   }
+  if (elements.diagnosticsTbody) {
+    elements.diagnosticsTbody.innerHTML = Array.from({ length: 4 })
+      .map(() => `
+        <tr class="diagnostics-skeleton-row" aria-hidden="true">
+          ${Array.from({ length: 9 }).map(() => `<td><div class="diagnostics-skeleton-cell"></div></td>`).join("")}
+        </tr>
+      `)
+      .join("");
+  }
   try {
     const data = await fetchJson("/portfolio/diagnostics", { auth: true });
     _diagnosticsCache = data;
@@ -765,18 +774,18 @@ function renderDiagnostics(data) {
 
         return `
           <tr class="diagnostics-row tone-${tone}">
-            <td><strong>${escapeText(p.symbol)}</strong></td>
-            <td><span class="diagnostics-chip">${escapeText(p.instrument_type)}</span></td>
-            <td class="diagnostics-num">${(Number(p.quantity) || 0).toLocaleString("es-AR")}</td>
-            <td>
+            <td data-label="Ticker"><strong>${escapeText(p.symbol)}</strong></td>
+            <td data-label="Tipo"><span class="diagnostics-chip">${escapeText(p.instrument_type)}</span></td>
+            <td class="diagnostics-num" data-label="Cantidad">${(Number(p.quantity) || 0).toLocaleString("es-AR")}</td>
+            <td data-label="Ratio">
               ${p.cedear_ratio ? `<strong>${p.cedear_ratio}:1</strong>` : "—"}
               <span class="diagnostics-ratio-source">${escapeText(ratioSourceLabel.shortLabel)}</span>
             </td>
-            <td class="diagnostics-num">${formatMoney(p.current_price, p.current_price_currency || "ARS")}</td>
-            <td class="diagnostics-num">${formatMoney(p.current_value_ars, "ARS", { magnitude: true })}</td>
-            <td class="diagnostics-num">${formatMoney(p.current_value_usd, "USD")}</td>
-            <td class="diagnostics-num">${(Number(p.implied_fx) || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</td>
-            <td class="diagnostics-num">
+            <td class="diagnostics-num" data-label="Precio">${formatMoney(p.current_price, p.current_price_currency || "ARS")}</td>
+            <td class="diagnostics-num" data-label="Valor ARS">${formatMoney(p.current_value_ars, "ARS", { magnitude: true })}</td>
+            <td class="diagnostics-num" data-label="Valor USD">${formatMoney(p.current_value_usd, "USD")}</td>
+            <td class="diagnostics-num" data-label="FX implicito">${(Number(p.implied_fx) || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</td>
+            <td class="diagnostics-num" data-label="Drift FX">
               <span class="diagnostics-drift tone-${tone}">${drift >= 0 ? "+" : ""}${drift.toFixed(1)}%</span>
             </td>
           </tr>
@@ -1780,16 +1789,40 @@ function formatErrorDetail(detail) {
   return String(detail);
 }
 
+const FETCH_TIMEOUT_MS = 90_000;
+
 async function fetchJson(path, options = {}) {
-  const { auth = false, headers = {}, ...rest } = options;
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...headers,
-      ...(auth ? authHeaders(true) : {})
-    },
-    ...rest
-  });
+  const { auth = false, headers = {}, signal: externalSignal, ...rest } = options;
+
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), FETCH_TIMEOUT_MS);
+
+  // Combine external abort signal (e.g. from analyzeTicker) with the timeout.
+  const signals = [timeoutController.signal];
+  if (externalSignal) signals.push(externalSignal);
+  const signal = signals.length > 1 && AbortSignal.any ? AbortSignal.any(signals) : timeoutController.signal;
+
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...(auth ? authHeaders(true) : {})
+      },
+      signal,
+      ...rest
+    });
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === "AbortError") {
+      if (timeoutController.signal.aborted && !(externalSignal && externalSignal.aborted)) {
+        throw new Error("El servidor está tardando más de lo normal. Intentá de nuevo en un momento.");
+      }
+    }
+    throw error;
+  }
+  clearTimeout(timeoutId);
 
   if (!response.ok) {
     let detail = `Error ${response.status}`;
@@ -1806,6 +1839,24 @@ async function fetchJson(path, options = {}) {
     return null;
   }
   return response.json();
+}
+
+let _toastTimeout = null;
+function showToast(message, { tone = "bull" } = {}) {
+  let toast = document.getElementById("analysis-toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "analysis-toast";
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
+    document.body.appendChild(toast);
+  }
+  toast.className = `analysis-toast tone-${tone} is-visible`;
+  toast.textContent = message;
+  clearTimeout(_toastTimeout);
+  _toastTimeout = setTimeout(() => {
+    toast.classList.remove("is-visible");
+  }, 4000);
 }
 
 function persistSession(session) {
@@ -2209,6 +2260,18 @@ async function loadPortfolioSummary() {
   }
 
   setPortfolioStatus("Actualizando portfolio...");
+  if (!state.portfolioSummary && elements.portfolioSummaryGrid) {
+    elements.portfolioSummaryGrid.innerHTML = `
+      <article class="portfolio-hero-summary is-skeleton" aria-hidden="true">
+        <div class="portfolio-skeleton-hero"></div>
+        <div class="portfolio-skeleton-satellites">
+          <div class="portfolio-skeleton-sat"></div>
+          <div class="portfolio-skeleton-sat"></div>
+          <div class="portfolio-skeleton-sat"></div>
+        </div>
+      </article>
+    `;
+  }
   try {
     const summary = await fetchJson("/portfolio/summary", { auth: true });
     state.portfolioSummary = summary;
@@ -3196,11 +3259,27 @@ async function loadUniverse() {
     .join("");
 }
 
+function renderRadarSkeleton() {
+  if (!elements.radarGrid) return;
+  elements.radarGrid.innerHTML = Array.from({ length: 6 })
+    .map(() => `
+      <div class="radar-card is-skeleton" aria-hidden="true">
+        <div class="radar-skeleton-chip"></div>
+        <div class="radar-skeleton-title"></div>
+        <div class="radar-skeleton-body"></div>
+      </div>
+    `)
+    .join("");
+}
+
 async function loadRankings() {
   const mode = state.rankingMode === "opportunities" ? "opportunities" : "default";
   const url = `/rankings?horizon=${state.horizon}&limit=6&cedear_only=true&mode=${mode}`;
   const cacheKey = rankingsCacheKey();
   const cachedRankings = readTimedCache(rankingsCache, cacheKey, RANKINGS_CACHE_TTL_MS);
+  if (!cachedRankings) {
+    renderRadarSkeleton();
+  }
   const rankings = cachedRankings || await fetchJson(url, {
     auth: Boolean(state.accessToken)
   });
@@ -3361,8 +3440,15 @@ async function analyzeTicker(nextTicker = state.ticker) {
   state.ticker = ticker;
   syncSelection();
   setLoading(true);
+  const submitBtn = elements.form ? elements.form.querySelector("button[type=submit]") : null;
+  setButtonBusy(submitBtn, true, "Analizando…");
   primeContextLoading(ticker);
-  setStatus(`Corriendo análisis real para ${ticker} en ${state.horizon}...`);
+  const firstAnalysis = !state.hasAnalyzed;
+  setStatus(
+    firstAnalysis
+      ? `Analizando ${ticker}... El primer análisis tarda unos segundos; los próximos serán instantáneos por cache.`
+      : `Corriendo análisis real para ${ticker} en ${state.horizon}...`
+  );
 
   const cachedBundle = readTimedCache(
     analysisBundleCache,
@@ -3390,6 +3476,7 @@ async function analyzeTicker(nextTicker = state.ticker) {
     // hop never blocks the cached analysis paint.
     renderSurpriseHistory(ticker);
     setLoading(false);
+    setButtonBusy(submitBtn, false);
     setStatus(`Análisis listo para ${ticker}. Resultado servido desde cache local.`);
     return;
   }
@@ -3454,6 +3541,26 @@ async function analyzeTicker(nextTicker = state.ticker) {
       earnings: earningsResult.status === "fulfilled" ? earningsResult.value : null
     });
     setStatus(`Análisis listo para ${ticker}. ${cedearMessage}`);
+
+    // Toast + scroll to verdict
+    showToast(`Analisis de ${ticker} listo`, { tone: "bull" });
+    const verdictPanel = document.querySelector(".verdict-panel");
+    if (verdictPanel) {
+      verdictPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    // Notification API when the tab is in the background
+    if (document.hidden && "Notification" in window) {
+      if (Notification.permission === "granted") {
+        new Notification(`Market Bot: analisis de ${ticker} listo`);
+      } else if (Notification.permission === "default") {
+        Notification.requestPermission().then((permission) => {
+          if (permission === "granted") {
+            new Notification(`Market Bot: analisis de ${ticker} listo`);
+          }
+        });
+      }
+    }
   } catch (error) {
     if (requestId !== state.analysisRequestId) return;
     if (error?.name === "AbortError") {
@@ -3472,6 +3579,7 @@ async function analyzeTicker(nextTicker = state.ticker) {
     }
     if (requestId === state.analysisRequestId) {
       setLoading(false);
+      setButtonBusy(submitBtn, false);
     }
   }
 }

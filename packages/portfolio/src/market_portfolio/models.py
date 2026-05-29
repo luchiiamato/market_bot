@@ -21,6 +21,12 @@ class PositionRecord:
     notes: str
     created_at: datetime
     updated_at: datetime
+    # FX rates at purchase date, captured from the Balanz extract when available.
+    # When set, _cost_basis uses these instead of querying argentinadatos.com
+    # (which can fail for older dates).
+    purchase_ccl: float | None = None
+    purchase_mep: float | None = None
+    purchase_official: float | None = None
 
 
 @dataclass

@@ -1200,6 +1200,163 @@ hace cuando el bot **conoce tu portfolio, tu perfil, tus decisiones**.
 
 ---
 
+## 4.10 · NEW SPRINT — Sprint 9 · REFORZAR EL MOTOR (la lógica) `[ ]` ⭐ FOCO
+
+> Pedido explícito del user (2026-05-30): "reforzar el motor, la lógica".
+> Tras auditar `packages/engine/src/market_bot/models/baseline.py` +
+> `signals/deterministic.py`, hay un problema de fondo real, no cosmético.
+
+### Diagnóstico — qué está mal en la lógica hoy
+
+1. **EL MODELO PREDICE LA COSA EQUIVOCADA (crítico).**
+   En `baseline.py:70-72` el target es `Close.shift(-1) > Close` — la dirección
+   del **próximo bar**. Para horizonte SHORT eso es **la próxima hora** (data 1h).
+   Predecir el próximo bar a 1h desde indicadores técnicos es esencialmente
+   **predecir ruido de microestructura** → por eso el warning `f1 < 0.48`
+   ("apenas supera al azar") salta casi siempre. El target debería ser el
+   **retorno a horizonte** (ej. +N días para short, +N semanas para long),
+   no el próximo bar. Este es EL fix de lógica más importante.
+
+2. **Un modelo por ticker, entrenado de cero sobre ~800 barras (`baseline.py:94-130`).**
+   RandomForest depth 5 sobre 14 features y muestra chica, por ticker, sin
+   aprendizaje cross-sectional. Overfittea ruido y además es lento (entrena
+   2-3 modelos × ticker → es la causa raíz de los 65s del ranking, ver Sprint 7).
+   Mejor: **un modelo pooled** entrenado sobre todo el universo (más robusto +
+   ~50x más rápido en inferencia + arregla la performance de raíz).
+
+3. **Mismatch de horizonte (`config.py` HORIZON_CONFIG).** SHORT = 180d de barras
+   1h prediciendo 1h; LONG = 5y de 1d prediciendo 1d. Ninguno matchea el
+   "corto/largo plazo" que el user elige (que deberían ser multi-día/multi-semana).
+
+4. **Los escenarios son una fórmula, no magnitudes (`baseline.py:232-260`).**
+   bull/base/bear salen de transformar `probability_up`, sin retorno esperado
+   asociado. El user ve "bull 45%" pero no "+8% esperado". Falta el **tamaño**
+   del movimiento (distribución de retornos a horizonte), no solo la dirección.
+
+5. **No hay hurdle / costos.** `probability_up > 0.5` no implica que valga la pena:
+   en ARS competís contra plazo fijo (tasa alta) + costos de transacción + el CCL.
+   La lógica de acción (`policy.py`) no descuenta ese piso.
+
+6. **Catalysts apenas integran (`service.py:_apply_rumor_policy`).** Solo capean
+   rumores; earnings/news confirmados no mueven la probabilidad de forma principiada.
+
+### Plan (ordenado por impacto)
+
+- **9.1 · Redefinir el target a retorno-a-horizonte** `[x]` DONE 2026-05-30 ← EL fix
+
+  > ✅ VERIFICADO EN VIVO 2026-05-30 (sesión A). Tras restart, `/analyze` real:
+  > NVDA F1=0.611, MELI F1=0.711, AAPL F1=0.588 (antes ~0.48 = azar, warning
+  > constante). Brier 0.23-0.26. Path validado (sample 1039), no fallback.
+  > **El target a horizonte es aprendible donde el de próximo bar era ruido —
+  > hipótesis confirmada con datos reales.** 92/92 tests verde.
+  > Bug encontrado y arreglado en la verificación: el call-site interno quedó con
+  > el nombre viejo `_target_horizon_bars` tras hacer público el helper → tiraba
+  > NameError y caía al fallback. Los tests no lo agarraron (mockean la función);
+  > SOLO la verificación en vivo lo detectó. Lección: correr `/analyze` real
+  > siempre que se toque `baseline.py`.
+  > Pendiente menor (no bloqueante): tunear H (35 short / 20 long son primera
+  > estimación; los F1 actuales ya validan que sirven).
+  - Target = signo del retorno a H barras según horizonte, no `shift(-1)`.
+
+  > **HECHO 2026-05-30 (sesión A, ~25% tokens):**
+  > - `models/baseline.py`: agregado `_TARGET_HORIZON_BARS = {SHORT: 35, LONG: 20}`
+  >   + helper `_target_horizon_bars(horizon)`. El target en `_generate_validated_signal`
+  >   pasó de `Close.shift(-1)` a `Close.shift(-horizon_bars)`. `modeling_frame` ahora
+  >   usa `.dropna()` (saca las últimas H filas sin futuro) en vez de `.iloc[:-1]`.
+  >   Nota de `ModelValidationSummary` actualizada. **92/92 tests verde**, app.py/baseline parsean.
+  > - El cambio es seguro: `generate_probabilistic_signal` envuelve en try/except →
+  >   si el path nuevo fallara en algún ticker, degrada al fallback heurístico (no 500).
+  >
+  > **PENDIENTE 9.1 (próximos steps, en orden):**
+  > 1. ✅ HECHO 2026-05-30 — **Alineado `validation/` al target del modelo.**
+  >    `walk_forward_predictions` ya labelaba a `horizon_days` (no era next-bar como
+  >    pensé), pero `validate_ticker` hardcodeaba `horizon_days=5`. Ahora:
+  >    `target_horizon_bars` se hizo público (models/__init__), `validate_ticker`
+  >    usa `horizon_days=None→target_horizon_bars(horizon)` por default, y el endpoint
+  >    `/validation/{ticker}` hace `horizon_days` opcional (default=None→alineado).
+  >    Modelo (35/20 barras) y Brier ahora miden el MISMO target. 92/92 verde.
+  >    Los `test_validation_brier` pasan sin cambios porque llaman con horizon_days
+  >    explícito; no asumían next-bar. → No hizo falta rehacer esos 12 tests.
+  > 2. **Verificación en vivo**: reiniciar server y `POST /analyze` sobre 3-4 tickers
+  >    con tendencia clara (ej. NVDA, MELI) → confirmar que el F1/Brier dejó de ser
+  >    ~azar y que `probability_up` tiene sentido. (No lo hice por presupuesto de tokens;
+  >    el server corriendo tiene código viejo de baseline — requiere restart + ~75s warmup.)
+  > 3. **Tunear H** si hace falta: 35 barras (SHORT) y 20 (LONG) son una primera
+  >    estimación; validar contra el F1 real por horizonte.
+  > 4. **Sanity de muestra**: con H grande, confirmar que el guard `len(modeling_frame) < 180`
+  >    no dispara fallback en tickers normales (para 180d×1h ~1260 barras está OK).
+
+- **9.2 · Modelo pooled cross-sectional** `[ ]` → **PLAN GRANULAR EN `docs/sprint-9.2-pooled-model.md`**
+  (7 pasos ejecutables + scope + riesgos + DoD + verificación en vivo. Arrancar por ahí.)
+  - Un solo modelo entrenado sobre features de TODO el universo (con ticker como
+    feature o normalización cross-sectional), inferencia por ticker.
+  - Arregla overfitting + mata los 65s del ranking (inferencia es ms, no s).
+  - Mantener el path per-ticker como fallback. Cuidar `test_validation_brier`.
+
+- **9.3 · Magnitudes en escenarios** `[ ]`
+  - Estimar distribución de retornos a horizonte (cuantiles del histórico
+    condicionado, o regresión) → bull/base/bear con "+X% / 0% / −Y%" esperado.
+  - El user ve tamaño, no solo dirección.
+
+- **9.4 · Hurdle ARS en la política de acción** `[ ]`
+  - En `policy.py`, descontar el piso (plazo fijo + costos) antes de sugerir compra.
+    "Sube probable, pero no le gana al plazo fijo" es una salida válida y honesta.
+
+- **9.5 · Integración principiada de catalysts** `[ ]`
+  - Earnings confirmados / surprise reciente / news de alta confianza desplazan
+    `probability_up` con un peso acotado y auditable (no solo capean rumores).
+
+**Archivos núcleo:** `packages/engine/src/market_bot/models/baseline.py`,
+`signals/deterministic.py`, `config.py` (HORIZON_CONFIG + horizonte de target),
+`validation/` (alinear walk-forward al nuevo target), `strategies/policy.py` (hurdle),
+`service.py` (`_apply_rumor_policy`). Tests: `test_validation_brier.py` (no romper
+determinismo), nuevos tests del target/horizonte.
+
+---
+
+## 4.11 · NEW SPRINT — Sprint 10 · Validación: probar que el motor tiene edge `[ ]`
+
+> Sin esto, el motor es una caja negra no validada. Es lo que convierte
+> "juguete lindo" en "tiene edge demostrable". Va junto con Sprint 9.
+
+- **10.1 · Decision audit loop completo (era 6.3)** `[ ]` — job offline
+  `realize_decisions` que completa `realized_return` N días después de cada
+  decisión guardada. Endpoint `GET /decisions/track-record`.
+- **10.2 · Backtest del ranking (era 6.9)** `[ ]` — "si seguías el top-3 del
+  ranking cada día, ¿qué pasaba?" vs SPY/Merval buy-and-hold + vs plazo fijo.
+  Métricas: cum return, max drawdown, hit rate, Sharpe, Calmar.
+- **10.3 · Track-record en UI** `[ ]` — panel que muestra el edge real (o la
+  falta de él, honestamente). Conectado a `/validation` (Brier) que ya existe.
+
+---
+
+## 4.12 · NEW SPRINT — Sprint 11 · Loop del tester + chat como interfaz `[ ]`
+
+- **11.1 · Botón de feedback in-app** `[ ]` — "Reportar algo" que escriba a una
+  tabla `feedback` (o mande mail vía el connector Gmail ya conectado). Cierra el
+  loop de feedback del tester. ~30 min, alto valor.
+- **11.2 · Onboarding mínimo (era 6.10)** `[ ]` — 3 pasos: cargar perfil →
+  importar Balanz → preguntarle al asistente. Sin esto el tester no encuentra el valor.
+- **11.3 · Tool-use del chat (era 8.3b)** `[ ]` — que el bot llame
+  `analyze_ticker` / `get_portfolio_summary` / `compare_to_benchmark` como tools.
+  Convierte el chat de "ChatGPT con contexto pegado" a interfaz principal mágica.
+
+---
+
+## 4.13 · NEW SPRINT — Sprint 12 · Confiabilidad + deploy real `[ ]`
+
+> Solo cuando el tester valide que vale la pena. No invertir en infra de algo no validado.
+
+- **12.1 · Abstraer el data source + fallback** `[ ]` — todo depende de yfinance
+  (no oficial, rate-limited, se rompe). Reforzar `MarketDataAdapter` con cache
+  agresivo + un provider de fallback (Alpha Vantage / Polygon) para no morir con
+  10 usuarios concurrentes. Esto es lo que frena pasar de 1 a 10 testers.
+- **12.2 · Deploy real con persistencia** `[ ]` — Heroku + Postgres (tenés créditos;
+  Heroku borra el SQLite al reiniciar → migrar la capa DB). Reemplaza el túnel +
+  Mac-prendida cuando deje de alcanzar.
+
+---
+
 ## 5 · DEFERRED — Backlog post-DoD
 
 ### Agent K · Social Sentiment `[deferred]`

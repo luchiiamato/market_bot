@@ -57,6 +57,9 @@ class PortfolioService:
         underlying_ticker: str | None = None,
         cedear_ratio: float | None = None,
         notes: str = "",
+        purchase_ccl: float | None = None,
+        purchase_mep: float | None = None,
+        purchase_official: float | None = None,
     ) -> PositionValuation:
         prepared = self._prepare_position_payload(
             instrument_type=instrument_type,
@@ -87,8 +90,11 @@ class PortfolioService:
                     purchase_currency,
                     notes,
                     created_at,
-                    updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    updated_at,
+                    purchase_ccl,
+                    purchase_mep,
+                    purchase_official
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user_id,
@@ -105,6 +111,9 @@ class PortfolioService:
                     prepared["notes"],
                     now,
                     now,
+                    purchase_ccl,
+                    purchase_mep,
+                    purchase_official,
                 ),
             )
             position_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
@@ -227,11 +236,21 @@ class PortfolioService:
             # Prefetch is a pure optimisation — never let it block valuation.
             pass
 
+        # Fetch current exchange rates once for the whole list — all positions
+        # share the same "today" snapshot. _build_position_valuation still calls
+        # build_period_snapshot per position for the purchase-date rates (which
+        # vary per position), but the current_exchange leg is the same for all.
+        try:
+            current_exchange = self.benchmark_service.get_current_exchange_rates()
+        except Exception:
+            current_exchange = None
+
         return [
             self._build_position_valuation(
                 record,
                 benchmark_preference,
                 risk_tolerance=risk_tolerance,
+                current_exchange=current_exchange,
             )
             for record in records
         ]
@@ -592,11 +611,14 @@ class PortfolioService:
         position: PositionRecord,
         benchmark_preference: str,
         risk_tolerance: str = "medium",
+        current_exchange=None,
     ) -> PositionValuation:
         today = date.today()
         snapshot = self.benchmark_service.build_period_snapshot(position.purchase_date, today)
         selected_house = _normalize_benchmark_preference(benchmark_preference)
-        current_fx = _pick_fx(snapshot.current_exchange, selected_house)
+        # Use hoisted current_exchange when available — same rates for all positions.
+        effective_current = current_exchange if current_exchange is not None else snapshot.current_exchange
+        current_fx = _pick_fx(effective_current, selected_house)
 
         notes: list[str] = []
         if position.instrument_type == "cedear":
@@ -610,7 +632,7 @@ class PortfolioService:
             # would get by selling the CEDEARs and dollarizing through CCL.
             # The (qty / ratio) × underlying_price formula gave wildly wrong USD
             # when the ratio fell back to 1.0 or to a parity-snapped neighbor.
-            current_ccl = snapshot.current_exchange.ccl
+            current_ccl = effective_current.ccl
             if current_ccl > 0:
                 current_value_usd = current_value_ars / current_ccl
             else:
@@ -746,10 +768,15 @@ class PortfolioService:
 
     def _cost_basis(self, position: PositionRecord, snapshot, selected_house: str) -> tuple[float, float]:
         notional = position.quantity * position.purchase_price
+
+        # Use FX stored from Balanz extract when available — argentinadatos.com
+        # doesn't always have rates for older dates, so the stored value is more
+        # reliable for historical positions.
         if position.instrument_type == "cedear" and position.purchase_currency == "ARS":
-            purchase_fx = snapshot.purchase_exchange.ccl
+            purchase_fx = position.purchase_ccl or snapshot.purchase_exchange.ccl
         else:
-            purchase_fx = _pick_fx(snapshot.purchase_exchange, selected_house)
+            stored_fx = _pick_stored_fx(position, selected_house)
+            purchase_fx = stored_fx or _pick_fx(snapshot.purchase_exchange, selected_house)
 
         if position.purchase_currency == "ARS":
             cost_basis_ars = notional
@@ -895,6 +922,7 @@ def _extract_latest_close(frame: pd.DataFrame, symbol: str) -> tuple[float, date
 
 
 def _record_from_row(row) -> PositionRecord:
+    keys = set(row.keys()) if hasattr(row, "keys") else set()
     return PositionRecord(
         position_id=int(row["id"]),
         user_id=int(row["user_id"]),
@@ -911,6 +939,9 @@ def _record_from_row(row) -> PositionRecord:
         notes=str(row["notes"]),
         created_at=datetime.fromisoformat(str(row["created_at"])),
         updated_at=datetime.fromisoformat(str(row["updated_at"])),
+        purchase_ccl=float(row["purchase_ccl"]) if "purchase_ccl" in keys and row["purchase_ccl"] is not None else None,
+        purchase_mep=float(row["purchase_mep"]) if "purchase_mep" in keys and row["purchase_mep"] is not None else None,
+        purchase_official=float(row["purchase_official"]) if "purchase_official" in keys and row["purchase_official"] is not None else None,
     )
 
 
@@ -927,6 +958,15 @@ def _pick_fx(exchange_rates, benchmark_preference: str) -> float:
     if benchmark_preference == "ccl":
         return exchange_rates.ccl
     return exchange_rates.mep
+
+
+def _pick_stored_fx(position, selected_house: str) -> float | None:
+    """Return the purchase-date FX stored on the position (from Balanz extract), or None."""
+    if selected_house == "official":
+        return position.purchase_official
+    if selected_house == "ccl":
+        return position.purchase_ccl
+    return position.purchase_mep
 
 
 def _fx_track(initial_ars: float, purchase_fx: float, current_fx: float) -> float:

@@ -5614,6 +5614,224 @@ body.is-booting .radar-grid > .radar-card:nth-child(6) { animation-delay: 340ms;
   }
 }
 
+/* ----------------------------- Radar skeleton ----------------------------- */
+
+.radar-card.is-skeleton {
+  pointer-events: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.radar-card.is-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg,
+    transparent 0%,
+    var(--text-ghost) 46%,
+    transparent 100%);
+  transform: translateX(-100%);
+  animation: shimmer 1200ms linear infinite;
+}
+
+.radar-skeleton-chip {
+  height: 18px;
+  width: 64px;
+  border-radius: 999px;
+  background: var(--text-ghost);
+  margin-bottom: 8px;
+}
+
+.radar-skeleton-title {
+  height: 22px;
+  width: 80%;
+  border-radius: 6px;
+  background: var(--text-ghost);
+  margin-bottom: 10px;
+}
+
+.radar-skeleton-body {
+  height: 14px;
+  width: 90%;
+  border-radius: 6px;
+  background: var(--text-ghost);
+}
+
+/* ----------------------------- Portfolio hero skeleton ----------------------------- */
+
+.portfolio-hero-summary.is-skeleton {
+  pointer-events: none;
+  position: relative;
+  overflow: hidden;
+  min-height: 120px;
+}
+
+.portfolio-hero-summary.is-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg,
+    transparent 0%,
+    var(--text-ghost) 46%,
+    transparent 100%);
+  transform: translateX(-100%);
+  animation: shimmer 1400ms linear infinite;
+}
+
+.portfolio-skeleton-hero {
+  height: 56px;
+  width: 60%;
+  border-radius: 10px;
+  background: var(--text-ghost);
+  margin-bottom: 18px;
+}
+
+.portfolio-skeleton-satellites {
+  display: flex;
+  gap: 12px;
+}
+
+.portfolio-skeleton-sat {
+  height: 40px;
+  flex: 1;
+  border-radius: 8px;
+  background: var(--text-ghost);
+}
+
+/* ----------------------------- Diagnostics skeleton ----------------------------- */
+
+.diagnostics-skeleton-row td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.diagnostics-skeleton-cell {
+  height: 14px;
+  border-radius: 6px;
+  background: var(--text-ghost);
+  position: relative;
+  overflow: hidden;
+}
+
+.diagnostics-skeleton-cell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg,
+    transparent 0%,
+    var(--text-ghost) 46%,
+    transparent 100%);
+  transform: translateX(-100%);
+  animation: shimmer 1200ms linear infinite;
+}
+
+/* ----------------------------- Toast ----------------------------- */
+
+.analysis-toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  opacity: 0;
+  background: var(--surface-card-strong);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  padding: 10px 22px;
+  font-family: var(--font-sans);
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text);
+  pointer-events: none;
+  transition: opacity 220ms var(--ease-out), transform 220ms var(--ease-out);
+  z-index: 9999;
+  white-space: nowrap;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.analysis-toast.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.analysis-toast.tone-bull {
+  border-color: var(--bull-border);
+}
+
+.analysis-toast.tone-bear {
+  border-color: var(--bear-border);
+}
+
+/* ----------------------------- Diagnostics mobile card layout ----------------------------- */
+
+@media (max-width: 600px) {
+  .diagnostics-table-wrap {
+    overflow-x: visible;
+    border: none;
+    background: transparent;
+  }
+
+  .diagnostics-table,
+  .diagnostics-table thead {
+    display: none;
+  }
+
+  .diagnostics-table tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .diagnostics-table tbody tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    background: var(--surface-tile);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    overflow: hidden;
+    padding: 0;
+  }
+
+  .diagnostics-table tbody td {
+    display: flex;
+    flex-direction: column;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--hairline);
+    border-right: 1px solid var(--hairline);
+  }
+
+  .diagnostics-table tbody td:nth-child(even) {
+    border-right: none;
+  }
+
+  .diagnostics-table tbody td::before {
+    content: attr(data-label);
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 3px;
+  }
+
+  .diagnostics-num {
+    white-space: normal;
+  }
+}
+
+/* ----------------------------- Touch targets min 44px ----------------------------- */
+
+@media (max-width: 720px) {
+  .ghost-button,
+  .action-tile,
+  .horizon-pill,
+  .ranking-mode-pill,
+  .portfolio-view-tab {
+    min-height: 44px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

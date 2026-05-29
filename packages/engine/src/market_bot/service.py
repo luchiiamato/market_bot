@@ -15,7 +15,7 @@ from .contracts import (
 from .backtesting import run_long_only_backtest
 from .data import InstrumentContext, MarketDataAdapter, MarketDataError, YFinanceMarketDataAdapter
 from .indicators import build_indicator_snapshot, compute_indicators
-from .models import generate_probabilistic_signal
+from .models import generate_probabilistic_signal, target_horizon_bars
 from .signals import generate_deterministic_signal
 from .strategies import (
     ProfileFilter,
@@ -41,7 +41,7 @@ from .validation import (
 class MarketBotService:
     def __init__(self, adapter: MarketDataAdapter | None = None):
         self.adapter = adapter or YFinanceMarketDataAdapter()
-        self._analysis_cache: TTLCache[TickerAnalysis] = TTLCache(ttl_seconds=180)
+        self._analysis_cache: TTLCache[TickerAnalysis] = TTLCache(ttl_seconds=900)
         self._rankings_cache: TTLCache[list[tuple[TickerAnalysis, float, list[str]]]] = TTLCache(
             ttl_seconds=600
         )
@@ -197,7 +197,7 @@ class MarketBotService:
         horizon: Horizon,
         *,
         warmup: int = 60,
-        horizon_days: int = 5,
+        horizon_days: int | None = None,
         step_days: int = 5,
     ) -> BrierResult:
         """Run walk-forward calibration for ``ticker`` and return Brier metrics.
@@ -205,7 +205,14 @@ class MarketBotService:
         ``step_days`` defaults to 5 so a 1-year history produces ~50 anchors —
         enough for a stable estimate without forcing the engine to recompute
         the probabilistic signal on every single day.
+
+        Sprint 9.1: ``horizon_days`` defaults to the SAME horizon the model
+        predicts (``target_horizon_bars``), so the Brier "track record" measures
+        the model against the exact target it was trained on — not next-bar.
+        Callers can still override explicitly.
         """
+        if horizon_days is None:
+            horizon_days = target_horizon_bars(horizon)
         normalized_ticker = ticker.upper()
         price_history = self.adapter.get_price_history(normalized_ticker, horizon)
         enriched_history = compute_indicators(price_history.frame)

@@ -166,18 +166,49 @@ def _warm_rankings_cache() -> None:
     def _warm() -> None:
         # Re-warm every 8 min — under the 600s ranking cache TTL — so the
         # cache never goes cold while a tester is exploring the app.
+        from market_bot.config import SUGGESTION_UNIVERSE
+
+        # Top tickers to pre-analyze individually so the first "Analizar setup"
+        # for these is a cache hit (~instant) instead of cold ML inference.
+        TOP_TICKERS_TO_ANALYZE = SUGGESTION_UNIVERSE[:10]
+
         while True:
+            # Warm BOTH modes for both horizons. "opportunities" was the last
+            # cold path a tester could hit (default + analysis are already warm),
+            # so warming it here closes the gap WITHOUT a fast-path model that
+            # would make the ranking's numbers diverge from the detail view.
+            # (See docs/plan-tester-ready.md — decision against 1A.3.)
             for horizon in (Horizon.SHORT, Horizon.LONG):
+                for warm_mode in ("default", "opportunities"):
+                    try:
+                        started = _time.perf_counter()
+                        service.rank_universe(
+                            horizon, limit=6, cedear_only=True, mode=warm_mode
+                        )
+                        elapsed = int((_time.perf_counter() - started) * 1000)
+                        api_logger.info(
+                            "rankings warmup done",
+                            extra={
+                                "horizon": horizon.value,
+                                "mode": warm_mode,
+                                "elapsed_ms": elapsed,
+                            },
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        api_logger.info(
+                            "rankings warmup failed",
+                            extra={"horizon": horizon.value, "mode": warm_mode, "error": str(exc)},
+                        )
+
+            # Pre-analyze top tickers with full context so the first individual
+            # analysis request from the tester hits the cache.
+            for ticker in TOP_TICKERS_TO_ANALYZE:
                 try:
-                    started = _time.perf_counter()
-                    service.rank_universe(horizon, limit=6, cedear_only=True, mode="default")
-                    elapsed = int((_time.perf_counter() - started) * 1000)
-                    api_logger.info(
-                        "rankings warmup done",
-                        extra={"horizon": horizon.value, "elapsed_ms": elapsed},
-                    )
+                    service.analyze_ticker(ticker, Horizon.SHORT)
+                    api_logger.info("analyze warmup done", extra={"ticker": ticker})
                 except Exception as exc:  # noqa: BLE001
-                    api_logger.info("rankings warmup failed", extra={"error": str(exc)})
+                    api_logger.info("analyze warmup failed", extra={"ticker": ticker, "error": str(exc)})
+
             _time.sleep(480)
 
     threading.Thread(target=_warm, name="rankings-warmup", daemon=True).start()
@@ -565,6 +596,9 @@ async def import_balanz_extract(
                 risk_tolerance=profile.risk_tolerance,
                 underlying_ticker=draft.underlying_ticker,
                 notes=draft.notes,
+                purchase_ccl=getattr(draft, "purchase_ccl", None),
+                purchase_mep=getattr(draft, "purchase_mep", None),
+                purchase_official=getattr(draft, "purchase_official", None),
             )
         except (PortfolioError, ArgentinaBenchmarkError) as exc:
             skipped_rows.append(
@@ -699,7 +733,7 @@ def rankings(
 def validation_report(
     ticker: str,
     horizon: str = Query(default="short", pattern="^(short|long)$"),
-    horizon_days: int = Query(default=5, ge=1, le=60),
+    horizon_days: Optional[int] = Query(default=None, ge=1, le=60),
     warmup: int = Query(default=60, ge=10, le=400),
     step_days: int = Query(default=5, ge=1, le=20),
 ) -> ValidationReportResponse:
@@ -707,13 +741,22 @@ def validation_report(
 
     Public on purpose — it's a "track record of the engine" view that helps
     a sceptical user decide whether to trust the model at all.
+
+    Sprint 9.1: if ``horizon_days`` is omitted, it defaults to the SAME horizon
+    the model predicts (``target_horizon_bars``) so the Brier reflects the real
+    target, not next-bar.
     """
+    from market_bot.models import target_horizon_bars  # local import, avoids cycle
+
+    resolved_horizon_days = (
+        horizon_days if horizon_days is not None else target_horizon_bars(Horizon(horizon))
+    )
     try:
         result = service.validate_ticker(
             ticker.upper(),
             Horizon(horizon),
             warmup=warmup,
-            horizon_days=horizon_days,
+            horizon_days=resolved_horizon_days,
             step_days=step_days,
         )
     except MarketDataError as exc:
@@ -722,7 +765,7 @@ def validation_report(
         ticker=ticker.upper(),
         horizon=horizon,
         warmup=warmup,
-        horizon_days=horizon_days,
+        horizon_days=resolved_horizon_days,
         step_days=step_days,
         sample_size=result.sample_size,
         brier_score=result.brier_score,

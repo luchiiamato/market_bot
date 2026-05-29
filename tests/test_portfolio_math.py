@@ -450,3 +450,53 @@ def test_balanz_normalize_currency_handles_all_variants():
     # ARS variants
     assert _normalize_currency("Pesos Argentinos") == "ARS"
     assert _normalize_currency("ARS") == "ARS"
+
+
+def test_purchase_ccl_override_used_in_cost_basis(monkeypatch):
+    """When purchase_ccl is stored on the position, _cost_basis uses it instead
+    of snapshot.purchase_exchange.ccl.
+
+    This covers the Bloque 3 / 6.1c fix: argentinadatos.com fails for old dates,
+    but the Balanz extract includes the FX at purchase time. The stored value
+    must win over the API-derived snapshot value.
+
+    Hand-computed:
+      - cost_basis_ars = 20 × 15000 = 300,000 ARS
+      - cost_basis_usd = 300,000 / 1050 (stored CCL) = 285.71 USD
+        (NOT 300,000 / 900 = 333.33, which is what the snapshot would give)
+    """
+    service = PortfolioService(
+        benchmark_service=_fake_benchmark_service(
+            current_ccl=1400.0,
+            purchase_ccl=900.0,  # snapshot says 900 — stored override says 1050
+            inflation_factor=1.0,
+            fixed_term_factor=1.0,
+        )
+    )
+
+    def fake_close(symbol):
+        return (18000.0, date.today()) if symbol.endswith(".BA") else (200.0, date.today())
+
+    monkeypatch.setattr(service, "_latest_close", fake_close)
+
+    position = _make_position(
+        instrument_type="cedear",
+        symbol="MSFT",
+        underlying_ticker="MSFT",
+        byma_symbol="MSFT.BA",
+        cedear_ratio=30.0,
+        cedear_ratio_source="canonical",
+        quantity=20,
+        purchase_date_=date(2023, 6, 15),
+        purchase_price=15000.0,
+        purchase_currency="ARS",
+    )
+    # Inject stored FX from Balanz extract
+    position.purchase_ccl = 1050.0
+
+    valuation = service._build_position_valuation(position, "ccl", risk_tolerance="medium")
+
+    assert valuation.cost_basis_ars == pytest.approx(300_000.0, abs=0.5)
+    assert valuation.cost_basis_usd == pytest.approx(285.71, abs=0.5)
+    # Confirm snapshot value was NOT used
+    assert valuation.cost_basis_usd != pytest.approx(333.33, abs=0.5)
