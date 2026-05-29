@@ -1,7 +1,7 @@
 // Build stamp — bumped on every UI design pass. Visible at the bottom of the
 // page AND in the console so we can confirm a fresh build is loaded when the
 // user reports "I don't see changes" (usually a cache issue).
-const MARKET_BOT_UI_BUILD = "2026-05-29 · sprint-9 · ux-wait+skeleton+toast+mobile";
+const MARKET_BOT_UI_BUILD = "20260530-sprint15 · indicators+ai-analysis-gemini-only";
 console.info(`%cMarket Bot UI build: ${MARKET_BOT_UI_BUILD}`, "color:#c6f25c;font-weight:600");
 document.addEventListener("DOMContentLoaded", function () {
   const mark = document.getElementById("build-mark");
@@ -40,8 +40,10 @@ const API_BASE =
 
 const AUTH_TOKEN_KEY = "marketBotAccessToken";
 const ANALYSIS_CACHE_TTL_MS = 60_000;
+const AI_ANALYSIS_CACHE_TTL_MS = 3 * 60_000;
 const RANKINGS_CACHE_TTL_MS = 30_000;
 const analysisBundleCache = new Map();
+const aiAnalysisCache = new Map();
 const rankingsCache = new Map();
 // GLOSSARY_TERMS moved to a separate lazy-loaded file (glossary.js).
 // We keep a let binding here that the rest of the app reads. The data is
@@ -96,6 +98,10 @@ const state = {
   analysisRequestId: 0,
   rankingMode: window.localStorage.getItem("marketBotRankingMode") || "default",
   currentFx: null,
+  aiAnalysis: null,
+  aiAnalysisLoading: false,
+  aiAnalysisError: "",
+  aiAnalysisRequestId: 0,
   // ----- Buffy / Chat -----
   chatInitialized: false,
   chatLoading: false,
@@ -115,6 +121,7 @@ const state = {
 
 let isApplyingRoute = false;
 let analysisAbortController = null;
+let aiAnalysisAbortController = null;
 
 const elements = {
   body: document.body,
@@ -161,6 +168,9 @@ const elements = {
   marketOverviewSummary: document.querySelector("#market-overview-summary"),
   marketOverviewGrid: document.querySelector("#market-overview-grid"),
   marketOverviewWarnings: document.querySelector("#market-overview-warnings"),
+  indicatorGrid: document.querySelector("#indicator-grid"),
+  indicatorAiButton: document.querySelector("#indicator-ai-button"),
+  aiAnalysisShell: document.querySelector("#ai-analysis-shell"),
   status: document.querySelector("#analysis-status"),
   datalist: document.querySelector("#ticker-suggestions"),
   horizonButtons: Array.from(document.querySelectorAll(".horizon-pill")),
@@ -488,6 +498,147 @@ function setButtonBusy(button, isBusy, busyLabel) {
   if (label) {
     label.textContent = isBusy ? busyLabel : button.dataset.defaultLabel;
   }
+}
+
+function aiAnalysisCacheKey(ticker = state.ticker, horizon = state.horizon) {
+  const viewer = state.profile?.user_id ? `u${state.profile.user_id}` : "guest";
+  return `${viewer}:${String(ticker || "").toUpperCase()}:${horizon}`;
+}
+
+function aiProviderLabel() {
+  return "Gemini Pro";
+}
+
+function resetAiAnalysis({ preserveResult = false } = {}) {
+  if (aiAnalysisAbortController) {
+    aiAnalysisAbortController.abort();
+    aiAnalysisAbortController = null;
+  }
+  state.aiAnalysisLoading = false;
+  state.aiAnalysisError = "";
+  if (!preserveResult) {
+    state.aiAnalysis = null;
+  }
+}
+
+function renderAiAnalysisPanel() {
+  if (!elements.aiAnalysisShell || !elements.indicatorAiButton) return;
+
+  const canAnalyze = state.hasAnalyzed && Boolean(state.ticker);
+  elements.indicatorAiButton.disabled = !canAnalyze || state.aiAnalysisLoading;
+
+  if (!state.hasAnalyzed) {
+    elements.aiAnalysisShell.innerHTML = `
+      <article class="ai-analysis-card is-empty">
+        <div class="ai-analysis-head">
+          <div>
+            <p class="analysis-kicker">${escapeText(aiProviderLabel())} / síntesis externa</p>
+            <h4>Esperando un setup real</h4>
+          </div>
+          <span class="tone-chip">Idle</span>
+        </div>
+        <p>Tocá <em>Analizar setup</em> primero. Cuando ya tengas el ticker procesado, este botón arma una segunda lectura con contexto externo, noticias y catalysts recientes.</p>
+      </article>
+    `;
+    return;
+  }
+
+  if (state.aiAnalysisLoading) {
+    elements.aiAnalysisShell.innerHTML = `
+      <article class="ai-analysis-card is-loading">
+        <div class="ai-analysis-head">
+          <div>
+            <p class="analysis-kicker">${escapeText(aiProviderLabel())} / síntesis externa</p>
+            <h4>Analizando ${escapeText(state.ticker)} con ${escapeText(aiProviderLabel())}</h4>
+          </div>
+          <span class="tone-chip">Buscando</span>
+        </div>
+        <div class="ai-analysis-skeleton">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <p class="panel-caption">Se consolida el setup técnico con noticias, earnings y contexto de mercado para esta lectura AI.</p>
+      </article>
+    `;
+    return;
+  }
+
+  if (state.aiAnalysisError) {
+    elements.aiAnalysisShell.innerHTML = `
+      <article class="ai-analysis-card is-error">
+        <div class="ai-analysis-head">
+          <div>
+            <p class="analysis-kicker">${escapeText(aiProviderLabel())} / síntesis externa</p>
+            <h4>No se pudo completar el análisis AI</h4>
+          </div>
+          <span class="signal-chip bear">Retry</span>
+        </div>
+        <p>${escapeText(state.aiAnalysisError)}</p>
+        <p class="panel-caption">Podés volver a intentar desde el mismo botón sin perder el resto del setup.</p>
+      </article>
+    `;
+    return;
+  }
+
+  if (!state.aiAnalysis) {
+    elements.aiAnalysisShell.innerHTML = `
+      <article class="ai-analysis-card is-empty">
+        <div class="ai-analysis-head">
+          <div>
+            <p class="analysis-kicker">${escapeText(aiProviderLabel())} / síntesis externa</p>
+            <h4>Segunda lectura opcional del setup</h4>
+          </div>
+          <span class="tone-chip">On demand</span>
+        </div>
+        <p>Ya tenés el setup consolidado. Si querés una capa extra con contexto externo y búsqueda web reciente, corré <strong>Analizar con AI</strong>.</p>
+      </article>
+    `;
+    return;
+  }
+
+  const citations = Array.isArray(state.aiAnalysis.citations) ? state.aiAnalysis.citations : [];
+  const citationsMarkup = citations.length
+    ? `
+        <div class="ai-analysis-citations">
+          <p class="analysis-kicker">Fuentes citadas</p>
+          <ul class="ai-analysis-citation-list">
+            ${citations
+              .map((citation) => {
+                const href = safeHttpUrl(citation.url);
+                if (!href) return "";
+                const meta = [citation.source, citation.published_at].filter(Boolean).join(" · ");
+                return `
+                  <li>
+                    <a href="${href}" target="_blank" rel="noopener noreferrer">${escapeText(citation.title || href)}</a>
+                    ${meta ? `<span>${escapeText(meta)}</span>` : ""}
+                  </li>
+                `;
+              })
+              .join("")}
+          </ul>
+        </div>
+      `
+    : "";
+
+  elements.aiAnalysisShell.innerHTML = `
+    <article class="ai-analysis-card">
+      <div class="ai-analysis-head">
+        <div>
+          <p class="analysis-kicker">${escapeText(aiProviderLabel(state.aiAnalysis.provider))} / síntesis externa</p>
+          <h4>Lectura AI para ${escapeText(state.aiAnalysis.ticker)}</h4>
+        </div>
+        <div class="ai-analysis-meta">
+          <span class="tone-chip">${escapeText(aiProviderLabel(state.aiAnalysis.provider))}</span>
+          <span class="tone-chip">${escapeText(state.aiAnalysis.model || "sonar")}</span>
+          <span class="tone-chip">${state.aiAnalysis.used_profile_context ? "Con perfil" : "Sin perfil"}</span>
+          <span class="tone-chip">${citations.length ? `${citations.length} fuentes` : "Sin citas"}</span>
+        </div>
+      </div>
+      <div class="ai-analysis-body">${renderMarkdown(state.aiAnalysis.content)}</div>
+      ${citationsMarkup}
+    </article>
+  `;
 }
 
 function surfaceLabel(surface) {
@@ -1859,6 +2010,67 @@ function showToast(message, { tone = "bull" } = {}) {
   }, 4000);
 }
 
+async function requestAiAnalysis() {
+  if (!state.hasAnalyzed || !state.ticker) {
+    showToast("Primero corré el setup antes de pedir la lectura AI.", { tone: "neutral" });
+    return;
+  }
+
+  const cacheKey = aiAnalysisCacheKey(state.ticker, state.horizon);
+  const cached = readTimedCache(aiAnalysisCache, cacheKey, AI_ANALYSIS_CACHE_TTL_MS);
+  if (cached) {
+    state.aiAnalysis = cached;
+    state.aiAnalysisError = "";
+    state.aiAnalysisLoading = false;
+    renderAiAnalysisPanel();
+    showToast(`Lectura AI de ${state.ticker} servida desde cache local.`, { tone: "neutral" });
+    return;
+  }
+
+  const requestId = ++state.aiAnalysisRequestId;
+  resetAiAnalysis();
+  state.aiAnalysisLoading = true;
+  renderAiAnalysisPanel();
+  setButtonBusy(elements.indicatorAiButton, true, `Consultando...`);
+
+  if (aiAnalysisAbortController) {
+    aiAnalysisAbortController.abort();
+  }
+  aiAnalysisAbortController = new AbortController();
+
+  try {
+    const result = await fetchJson("/analyze/ai", {
+      method: "POST",
+      auth: Boolean(state.accessToken),
+      signal: aiAnalysisAbortController.signal,
+      body: JSON.stringify({
+        ticker: state.ticker,
+        horizon: state.horizon
+      })
+    });
+    if (requestId !== state.aiAnalysisRequestId) return;
+    state.aiAnalysis = result;
+    state.aiAnalysisError = "";
+    writeTimedCache(aiAnalysisCache, cacheKey, result);
+    renderAiAnalysisPanel();
+    showToast(`Lectura ${aiProviderLabel()} de ${state.ticker} lista.`, { tone: "bull" });
+  } catch (error) {
+    if (requestId !== state.aiAnalysisRequestId) return;
+    if (error?.name === "AbortError") return;
+    state.aiAnalysis = null;
+    state.aiAnalysisError = error.message || "No se pudo completar el análisis AI.";
+    renderAiAnalysisPanel();
+    showToast(`No se pudo completar la lectura ${aiProviderLabel()}.`, { tone: "bear" });
+  } finally {
+    state.aiAnalysisLoading = false;
+    if (requestId === state.aiAnalysisRequestId) {
+      setButtonBusy(elements.indicatorAiButton, false);
+      renderAiAnalysisPanel();
+    }
+    aiAnalysisAbortController = null;
+  }
+}
+
 function persistSession(session) {
   state.accessToken = session.access_token;
   state.profile = session.profile;
@@ -1869,6 +2081,7 @@ function clearSession() {
   state.accessToken = null;
   state.profile = null;
   state.portfolioSummary = null;
+  resetAiAnalysis();
   window.localStorage.removeItem(AUTH_TOKEN_KEY);
 }
 
@@ -2022,6 +2235,7 @@ function renderMiniSummary(summary) {
 
 function renderWorkspaceIdle() {
   state.hasAnalyzed = false;
+  resetAiAnalysis();
   elements.workspaceTitle.textContent = `Ticker seleccionado: ${state.ticker}`;
   elements.marketChip.textContent = `${titleCaseHorizon(state.horizon)} · Radar listo`;
   elements.verdictGrid.innerHTML = `
@@ -2076,6 +2290,7 @@ function renderWorkspaceIdle() {
     tone: "neutral"
   });
   elements.earningsTitle.textContent = "Sin calendario cargado";
+  renderAiAnalysisPanel();
   syncSelection();
 }
 
@@ -2417,12 +2632,18 @@ function renderPortfolioSummary(summary) {
       const userNotesBlock = position.user_notes
         ? `<p class="panel-caption">${escapeText(position.user_notes)}</p>`
         : "";
+      const dailyChangePct = position.change_pct_1d || 0;
+      const dailyChangeTone = dailyChangePct > 0 ? "bull" : dailyChangePct < 0 ? "bear" : "neutral";
+      const dailyChangeBadge = dailyChangePct !== 0
+        ? `<span class="holding-daily-badge ${dailyChangeTone}">${dailyChangePct > 0 ? "+" : ""}${(dailyChangePct * 100).toFixed(2)}% hoy</span>`
+        : "";
+
       return `
         <article class="holding-card ${state.editingPositionId === position.position_id ? "is-editing" : ""}">
           <div class="holding-head">
             <div>
               <p class="analysis-kicker">${toHeadline(position.instrument_type)}</p>
-              <h3>${escapeText(position.symbol)}</h3>
+              <h3>${escapeText(position.symbol)} ${dailyChangeBadge}</h3>
               <p class="panel-caption">${escapeText(position.underlying_ticker)} · Compra ${escapeText(position.purchase_date)}</p>
               ${effectiveSharesLine}
               ${userNotesBlock}
@@ -3428,6 +3649,17 @@ function escapeText(value) {
     .replace(/'/g, "&#39;");
 }
 
+// Only linkify when the URL is a valid http(s) URL; otherwise callers fall back to plain text.
+function safeHttpUrl(value) {
+  if (!value) return null;
+  try {
+    const parsed = new URL(String(value), window.location.href);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
 async function analyzeTicker(nextTicker = state.ticker) {
   const ticker = nextTicker.toUpperCase().trim();
   if (!ticker) {
@@ -3438,6 +3670,8 @@ async function analyzeTicker(nextTicker = state.ticker) {
 
   const requestId = ++state.analysisRequestId;
   state.ticker = ticker;
+  resetAiAnalysis();
+  renderAiAnalysisPanel();
   syncSelection();
   setLoading(true);
   const submitBtn = elements.form ? elements.form.querySelector("button[type=submit]") : null;
@@ -3589,6 +3823,7 @@ function renderAnalysis(analysis) {
   elements.workspaceTitle.textContent = `Ticker seleccionado: ${analysis.ticker}`;
   elements.marketChip.textContent = `${titleCaseHorizon(analysis.horizon)} · ${state.universe.includes(analysis.ticker) ? "CEDEAR" : "No CEDEAR"}`;
   elements.tickerInput.value = analysis.ticker;
+  renderAiAnalysisPanel();
 
   const primaryAction = analysis.actions[0]?.action || "hold";
   const convictionPct = `${Math.round(analysis.probabilistic.confidence * 100)}%`;
@@ -3610,6 +3845,8 @@ function renderAnalysis(analysis) {
       `
     )
     .join("");
+
+  renderIndicators(analysis.indicators || {});
 
   elements.deterministicTitle.textContent = toSentence(analysis.deterministic.setup_name);
   elements.deterministicReasons.innerHTML = analysis.deterministic.reasons
@@ -3666,6 +3903,191 @@ function renderAnalysis(analysis) {
     : "<li>Sin guardrails adicionales.</li>";
 
   syncSelection();
+}
+
+// Indicator cards (sprint 13.2): surface the most useful technical readings with
+// a hover/tap tooltip that combines the glossary definition + the live value.
+function indicatorReading(key, value, indicators) {
+  const num = Number(value);
+  const has = Number.isFinite(num);
+  switch (key) {
+    case "rsi":
+      if (!has) return { tone: "neutral", reading: "sin dato" };
+      if (num >= 70) return { tone: "bear", reading: "sobrecompra" };
+      if (num >= 60) return { tone: "neutral", reading: "acercándose a sobrecompra" };
+      if (num <= 30) return { tone: "bull", reading: "sobreventa" };
+      if (num <= 40) return { tone: "neutral", reading: "acercándose a sobreventa" };
+      return { tone: "neutral", reading: "momentum neutral" };
+    case "macd": {
+      const signal = Number(indicators.macd_signal);
+      if (!has) return { tone: "neutral", reading: "sin dato" };
+      if (Number.isFinite(signal)) {
+        return num >= signal
+          ? { tone: "bull", reading: "por encima de la señal (impulso alcista)" }
+          : { tone: "bear", reading: "por debajo de la señal (impulso bajista)" };
+      }
+      return num >= 0
+        ? { tone: "bull", reading: "momentum positivo" }
+        : { tone: "bear", reading: "momentum negativo" };
+    }
+    case "adx":
+      if (!has) return { tone: "neutral", reading: "sin dato" };
+      if (num >= 25) return { tone: "bull", reading: "tendencia fuerte" };
+      if (num >= 20) return { tone: "neutral", reading: "tendencia incipiente" };
+      return { tone: "neutral", reading: "tendencia débil / lateral" };
+    case "atr": {
+      const price = Number(indicators.price);
+      if (!has) return { tone: "neutral", reading: "sin dato" };
+      if (Number.isFinite(price) && price > 0) {
+        const pct = (num / price) * 100;
+        const tone = pct >= 4 ? "bear" : "neutral";
+        return { tone, reading: `~${pct.toFixed(1).replace(".", ",")}% del precio` };
+      }
+      return { tone: "neutral", reading: "rango medio diario" };
+    }
+    case "volume_ratio":
+      if (!has) return { tone: "neutral", reading: "sin dato" };
+      if (num >= 1.5) return { tone: "bull", reading: "volumen muy por encima del promedio" };
+      if (num >= 1.1) return { tone: "bull", reading: "volumen por encima del promedio" };
+      if (num <= 0.7) return { tone: "bear", reading: "volumen flojo" };
+      return { tone: "neutral", reading: "volumen en línea con el promedio" };
+    case "price_vs_sma50": {
+      const price = Number(indicators.price);
+      const sma = Number(indicators.sma_50);
+      if (!Number.isFinite(price) || !Number.isFinite(sma) || sma === 0) {
+        return { tone: "neutral", reading: "sin dato" };
+      }
+      const pct = ((price - sma) / sma) * 100;
+      const tone = pct >= 0 ? "bull" : "bear";
+      const verb = pct >= 0 ? "por encima" : "por debajo";
+      return { tone, reading: `${verb} de la SMA50 (${formatPercent((price - sma) / sma, { signed: true })})` };
+    }
+    case "price_vs_sma200": {
+      const price = Number(indicators.price);
+      const sma = Number(indicators.sma_200);
+      if (!Number.isFinite(price) || !Number.isFinite(sma) || sma === 0) {
+        return { tone: "neutral", reading: "sin dato" };
+      }
+      const pct = ((price - sma) / sma) * 100;
+      const tone = pct >= 0 ? "bull" : "bear";
+      const verb = pct >= 0 ? "por encima" : "por debajo";
+      return { tone, reading: `${verb} de la SMA200 (${formatPercent((price - sma) / sma, { signed: true })})` };
+    }
+    default:
+      return { tone: "neutral", reading: "" };
+  }
+}
+
+function renderIndicators(indicators) {
+  if (!elements.indicatorGrid) return;
+
+  // Definition: which indicators we surface, their display value + matching glossary id.
+  const specs = [
+    {
+      key: "rsi",
+      glossaryId: "rsi",
+      label: "RSI",
+      sub: "Momentum",
+      present: indicators.rsi !== null && indicators.rsi !== undefined,
+      value: Number.isFinite(Number(indicators.rsi)) ? Number(indicators.rsi).toFixed(0) : "—"
+    },
+    {
+      key: "macd",
+      glossaryId: "macd",
+      label: "MACD",
+      sub: "Cruce de medias",
+      present: indicators.macd !== null && indicators.macd !== undefined,
+      value: Number.isFinite(Number(indicators.macd)) ? Number(indicators.macd).toFixed(2).replace(".", ",") : "—"
+    },
+    {
+      key: "adx",
+      glossaryId: "adx",
+      label: "ADX",
+      sub: "Fuerza de tendencia",
+      present: indicators.adx !== null && indicators.adx !== undefined,
+      value: Number.isFinite(Number(indicators.adx)) ? Number(indicators.adx).toFixed(0) : "—"
+    },
+    {
+      key: "atr",
+      glossaryId: "atr",
+      label: "ATR",
+      sub: "Volatilidad",
+      present: indicators.atr !== null && indicators.atr !== undefined,
+      value: Number.isFinite(Number(indicators.atr)) ? formatCurrency(indicators.atr, "USD") : "—"
+    },
+    {
+      key: "volume_ratio",
+      glossaryId: "liquidity",
+      label: "Volumen",
+      sub: "Ratio vs promedio",
+      present: indicators.volume_ratio !== null && indicators.volume_ratio !== undefined,
+      value: Number.isFinite(Number(indicators.volume_ratio)) ? `${Number(indicators.volume_ratio).toFixed(2).replace(".", ",")}×` : "—"
+    },
+    {
+      key: "price_vs_sma50",
+      glossaryId: "trend-following",
+      label: "Precio vs SMA50",
+      sub: "Estructura de mediano plazo",
+      present:
+        Number.isFinite(Number(indicators.price)) && Number.isFinite(Number(indicators.sma_50)),
+      value: Number.isFinite(Number(indicators.sma_50)) ? formatCurrency(indicators.sma_50, "USD") : "—"
+    },
+    {
+      key: "price_vs_sma200",
+      glossaryId: "trend-following",
+      label: "Precio vs SMA200",
+      sub: "Estructura de largo plazo",
+      present:
+        Number.isFinite(Number(indicators.price)) && Number.isFinite(Number(indicators.sma_200)),
+      value: Number.isFinite(Number(indicators.sma_200)) ? formatCurrency(indicators.sma_200, "USD") : "—"
+    }
+  ];
+
+  const shown = specs.filter((spec) => spec.present);
+  if (!shown.length) {
+    renderContextPlaceholder(elements.indicatorGrid, {
+      title: "Sin indicadores disponibles",
+      body: "El snapshot no trajo lecturas técnicas para este ticker.",
+      tone: "neutral"
+    });
+    return;
+  }
+
+  // Glossary may not be loaded yet; render now, then enrich tooltips when it arrives.
+  const paint = () => {
+    const terms = window.MARKET_BOT_GLOSSARY || GLOSSARY_TERMS || [];
+    const byId = new Map(terms.map((t) => [t.id, t]));
+    elements.indicatorGrid.innerHTML = shown.map((spec) => indicatorCardMarkup(spec, indicators, byId)).join("");
+  };
+  paint();
+  ensureGlossaryLoaded().then(() => {
+    // Re-paint only if the grid still holds this analysis (cheap and idempotent).
+    if (elements.indicatorGrid) paint();
+  });
+}
+
+function indicatorCardMarkup(spec, indicators, byId) {
+  const sourceValue =
+    spec.key === "price_vs_sma50" || spec.key === "price_vs_sma200" ? indicators.price : indicators[spec.key];
+  const { tone, reading } = indicatorReading(spec.key, sourceValue, indicators);
+  const term = byId.get(spec.glossaryId);
+  const definition = term ? `${term.label}: ${term.detail || term.short || ""}`.trim() : "";
+  const valueLine = reading ? `Actual: ${spec.value} — ${reading}` : `Actual: ${spec.value}`;
+  const tooltipText = definition ? `${definition} | ${valueLine}` : valueLine;
+  return `
+    <div class="indicator-card" tabindex="0" data-tone="${tone}" aria-label="${escapeAttribute(`${spec.label}. ${tooltipText}`)}">
+      <div class="indicator-card-head">
+        <span class="indicator-name">${escapeText(spec.label)}</span>
+        <span class="indicator-value ${tone}">${escapeText(spec.value)}</span>
+      </div>
+      <span class="indicator-sub">${escapeText(spec.sub)}</span>
+      ${reading ? `<span class="indicator-reading ${tone}">${escapeText(reading)}</span>` : ""}
+      <div class="indicator-tooltip" role="tooltip">
+        ${definition ? `<p class="indicator-tooltip-def">${escapeText(definition)}</p>` : ""}
+        <p class="indicator-tooltip-value">${escapeText(valueLine)}</p>
+      </div>
+    </div>
+  `;
 }
 
 function renderMarketOverview(overview) {
@@ -3815,6 +4237,7 @@ function renderTickerEarningsError(message) {
 }
 
 function renderErrorState(ticker, error) {
+  resetAiAnalysis();
   elements.workspaceTitle.textContent = `Ticker seleccionado: ${ticker}`;
   elements.marketChip.textContent = `${titleCaseHorizon(state.horizon)} · Error`;
   elements.verdictGrid.innerHTML = `
@@ -3847,6 +4270,7 @@ function renderErrorState(ticker, error) {
   `;
   elements.catalystList.innerHTML = "<li>No hay catalysts porque el análisis falló.</li>";
   elements.guardrailList.innerHTML = "<li>Verificar que `uvicorn services.api.app:app --reload` esté levantado.</li>";
+  renderAiAnalysisPanel();
 }
 
 function syncSelection() {
@@ -4019,8 +4443,9 @@ function renderCatalysts(catalysts) {
         ? status
         : "inferred";
       const chip = `<span class="catalyst-chip" data-status="${validStatus}">${toHeadline(validStatus)}</span>`;
-      const source = item.source_url
-        ? `<a class="context-link" href="${escapeAttribute(item.source_url)}" target="_blank" rel="noreferrer">Fuente</a>`
+      const url = safeHttpUrl(item.source_url);
+      const source = url
+        ? `<a class="context-link" href="${escapeAttribute(url)}" target="_blank" rel="noopener noreferrer">Fuente</a>`
         : "";
       return `<li>${escapeText(item.name)} ${chip} ${source}</li>`;
     })
@@ -4030,9 +4455,14 @@ function renderCatalysts(catalysts) {
 function renderNewsCard(item) {
   const sentimentTone = item.sentiment >= 0.15 ? "bull" : item.sentiment <= -0.15 ? "bear" : "neutral";
   const confidencePct = Math.round((item.confidence || 0) * 100);
-  const linkOpen = item.url
-    ? `<a class="context-link" href="${escapeAttribute(item.url)}" target="_blank" rel="noreferrer">Abrir</a>`
+  const url = safeHttpUrl(item.url);
+  const linkOpen = url
+    ? `<a class="context-link" href="${escapeAttribute(url)}" target="_blank" rel="noopener noreferrer">Abrir</a>`
     : `<span class="context-link is-muted">Sin link</span>`;
+  const headline = escapeText(item.title);
+  const headlineMarkup = url
+    ? `<a class="context-headline-link" href="${escapeAttribute(url)}" target="_blank" rel="noopener noreferrer">${headline}</a>`
+    : headline;
   const summary = item.summary ? `<p>${escapeText(item.summary)}</p>` : "";
   return `
     <article class="context-card">
@@ -4040,7 +4470,7 @@ function renderNewsCard(item) {
         <span class="tone-chip">${escapeText(item.impact_category || "general")}</span>
         <span class="signal-chip ${sentimentTone}">${sentimentTone === "bull" ? "Bullish" : sentimentTone === "bear" ? "Bearish" : "Neutral"}</span>
       </div>
-      <h4>${escapeText(item.title)}</h4>
+      <h4>${headlineMarkup}</h4>
       ${summary}
       <div class="context-meta">
         <span>${escapeText(item.source || "Fuente no informada")}</span>
@@ -4094,11 +4524,54 @@ function renderMarketPulseCard(item) {
   `;
 }
 
+const OFFICIAL_IR_LINKS = {
+  AAPL: "https://investor.apple.com/financials.cfm",
+  AMD: "https://ir.amd.com/",
+  AMZN: "https://ir.aboutamazon.com/",
+  COIN: "https://investor.coinbase.com/home/default.aspx",
+  GGAL: "https://www.gfgsa.com/en",
+  GOOG: "https://abc.xyz/investor/earnings",
+  GOOGL: "https://abc.xyz/investor/earnings",
+  MELI: "https://investor.mercadolibre.com/",
+  META: "https://investor.atmeta.com/home/",
+  MSFT: "https://www.microsoft.com/en-us/investor",
+  NU: "https://investors.nu/",
+  NVDA: "https://investor.nvidia.com/home/default.aspx",
+  PLTR: "https://investors.palantir.com/",
+  SNOW: "https://investors.snowflake.com/overview/default.aspx?lang=none",
+  TSLA: "https://ir.tesla.com/investor-relations",
+  YPF: "https://investors.ypf.com/"
+};
+
+function earningsResourceLink(ticker) {
+  const normalizedTicker = String(ticker || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\.BA$/, "")
+    .replace("/", ".");
+  if (!normalizedTicker) {
+    return { url: "", label: "Sin link" };
+  }
+  const official = OFFICIAL_IR_LINKS[normalizedTicker];
+  if (official) {
+    return {
+      url: official,
+      label: "IR oficial"
+    };
+  }
+  const nasdaqTicker = normalizedTicker.toLowerCase().replace(/[./\s]+/g, "-");
+  return {
+    url: `https://www.nasdaq.com/market-activity/stocks/${encodeURIComponent(nasdaqTicker)}/earnings`,
+    label: "Nasdaq"
+  };
+}
+
 function renderEarningsEventCard(event, options = {}) {
   const compact = Boolean(options.compact);
   const estimateLine = event.eps_estimate !== null && event.eps_estimate !== undefined
     ? `EPS est. ${event.eps_estimate}`
     : "EPS est. n/d";
+  const earningsLink = earningsResourceLink(event.ticker);
   return `
     <article class="earnings-card ${compact ? "is-compact" : ""}">
       <div class="context-card-top">
@@ -4107,6 +4580,9 @@ function renderEarningsEventCard(event, options = {}) {
       </div>
       <h4>${escapeText(formatDateLabel(event.report_date))}</h4>
       <p>${escapeText(estimateLine)}</p>
+      <div class="context-actions">
+        <a class="context-link" href="${escapeAttribute(earningsLink.url)}" target="_blank" rel="noopener noreferrer">${escapeText(earningsLink.label)}</a>
+      </div>
     </article>
   `;
 }
@@ -4122,6 +4598,27 @@ function formatSurprisePct(value) {
   return `${sign}${pct.toFixed(1)}%`;
 }
 
+function formatFiscalQuarterParts(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return { quarter: "Q?", year: "" };
+  }
+  const parts = raw.split(/\s+/);
+  return {
+    quarter: parts[0] || raw,
+    year: parts.slice(1).join(" ")
+  };
+}
+
+function formatEpsValue(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "n/d";
+  return numeric.toLocaleString("es-AR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
 function renderSurpriseHistoryCell(event) {
   // beat flag drives the bull/bear tint. surprise_pct is the magnitude chip.
   // next_day_return_pct is shown below — useful because sometimes the print
@@ -4135,15 +4632,53 @@ function renderSurpriseHistoryCell(event) {
       : event.next_day_return_pct >= 0
         ? "bull"
         : "bear";
+  const beatLabel =
+    event.beat === true
+      ? "Superó"
+      : event.beat === false
+        ? "Falló"
+        : "En línea";
+  const { quarter, year } = formatFiscalQuarterParts(event.fiscal_quarter);
+  const earningsLink = earningsResourceLink(event.ticker || state.ticker);
+  const details = [
+    { label: "EPS est.", value: formatEpsValue(event.eps_estimate) },
+    { label: "EPS real", value: formatEpsValue(event.eps_actual) },
+    { label: "Cierre D+1", value: event.next_day_close_date ? formatDateLabel(event.next_day_close_date) : "n/d" }
+  ];
   return `
-    <article class="earnings-history-cell ${tone}" title="${escapeAttribute(`${event.fiscal_quarter} · ${event.report_date}`)}">
-      <div class="earnings-history-cell-head">
-        <span class="earnings-history-quarter">${escapeText(event.fiscal_quarter)}</span>
-        <span class="signal-chip ${tone}">${escapeText(surpriseLabel)}</span>
+    <article class="earnings-history-cell ${tone}" tabindex="0" title="${escapeAttribute(`${event.fiscal_quarter} · ${event.report_date}`)}">
+      <div class="earnings-history-top">
+        <div class="earnings-history-period">
+          <span class="earnings-history-quarter">${escapeText(quarter)}</span>
+          ${year ? `<span class="earnings-history-year">${escapeText(year)}</span>` : ""}
+        </div>
+        <div class="earnings-history-pill-row">
+          <div class="earnings-history-pill ${tone}">
+            <span class="earnings-history-pill-label">${escapeText(beatLabel)}</span>
+            <strong>${escapeText(surpriseLabel)}</strong>
+          </div>
+          <div class="earnings-history-pill ${moveTone}">
+            <span class="earnings-history-pill-label">D+1</span>
+            <strong>${escapeText(moveLabel)}</strong>
+          </div>
+        </div>
       </div>
       <div class="earnings-history-meta">
         <span class="earnings-history-date">${escapeText(event.report_date)}</span>
-        <span class="signal-chip ${moveTone}">D+1 ${escapeText(moveLabel)}</span>
+        <span class="earnings-history-hover-hint">Hover para más</span>
+      </div>
+      <div class="earnings-history-detail" aria-hidden="true">
+        ${details
+          .map(
+            (item) => `
+              <div class="earnings-history-detail-row">
+                <span>${escapeText(item.label)}</span>
+                <strong>${escapeText(item.value)}</strong>
+              </div>
+            `
+          )
+          .join("")}
+        <a class="context-link earnings-history-link" href="${escapeAttribute(earningsLink.url)}" target="_blank" rel="noopener noreferrer">Abrir ${escapeText(earningsLink.label)}</a>
       </div>
     </article>
   `;
@@ -4351,6 +4886,12 @@ if (elements.earningsBannerCta) {
   });
 }
 
+if (elements.indicatorAiButton) {
+  elements.indicatorAiButton.addEventListener("click", () => {
+    requestAiAnalysis();
+  });
+}
+
 elements.horizonButtons.forEach((button) => {
   button.addEventListener("click", async () => {
     state.horizon = button.dataset.horizon;
@@ -4374,6 +4915,22 @@ elements.radarGrid.addEventListener("click", (event) => {
   if (!card) return;
   analyzeTicker(card.dataset.ticker);
 });
+
+// Touch devices have no hover: tap an indicator card to toggle its tooltip.
+if (elements.indicatorGrid) {
+  elements.indicatorGrid.addEventListener("click", (event) => {
+    const card = event.target.closest(".indicator-card");
+    if (!card) return;
+    const wasOpen = card.classList.contains("is-open");
+    elements.indicatorGrid.querySelectorAll(".indicator-card.is-open").forEach((c) => c.classList.remove("is-open"));
+    if (!wasOpen) card.classList.add("is-open");
+  });
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".indicator-card")) {
+      elements.indicatorGrid.querySelectorAll(".indicator-card.is-open").forEach((c) => c.classList.remove("is-open"));
+    }
+  });
+}
 
 elements.learningFilters.addEventListener("click", (event) => {
   const button = event.target.closest("[data-learning-filter]");

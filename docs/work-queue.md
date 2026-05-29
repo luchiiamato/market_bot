@@ -1286,8 +1286,58 @@ hace cuando el bot **conoce tu portfolio, tu perfil, tus decisiones**.
   > 4. **Sanity de muestra**: con H grande, confirmar que el guard `len(modeling_frame) < 180`
   >    no dispara fallback en tickers normales (para 180d×1h ~1260 barras está OK).
 
-- **9.2 · Modelo pooled cross-sectional** `[ ]` → **PLAN GRANULAR EN `docs/sprint-9.2-pooled-model.md`**
-  (7 pasos ejecutables + scope + riesgos + DoD + verificación en vivo. Arrancar por ahí.)
+- **9.2 · Modelo pooled cross-sectional** `[~]` CASI — pasos 1-7 HECHOS, falta solo live verify.
+  → Detalle en `docs/sprint-9.2-pooled-model.md`.
+  > ✅ 2026-05-30: `models/pooled.py` (train con split temporal anti-leakage),
+  > wirado en `service.py` (`_probabilistic_for`: pooled-cuando-cacheado, fallback
+  > per-ticker, nunca bloquea), entrenado en el warmup de `app.py` (mata los 65s),
+  > `tests/test_pooled_model.py` (4 tests offline). **96/96 verde.**
+  > ✅ VERIFICADO EN VIVO 2026-05-30: el pooled entrena (58 tickers, 44s) pero
+  > f1≈0.417 (peor que el per-ticker 0.58-0.71). Agregué **quality gate**
+  > (`MIN_POOLED_F1=0.52`): se usa el pooled solo si su f1 supera el bar; si no,
+  > cae al per-ticker. Verificado: con f1=0.417 cae a per-ticker (split correcto).
+  > **Correctness protegida; el speed win queda pendiente de 9.2b (mejorar el pooled).**
+  > Infra lista: apenas un pooled cruce f1≥0.52 el gate lo activa solo.
+
+- **9.2b · Mejorar el pooled + gate honesto** `[x]` DONE 2026-05-30
+  > Implementé normalización per-ticker (z-score) de features. Medido en vivo:
+  > SHORT f1=0.31, LONG f1=0.63 — PERO **accuracy ~0.50-0.51 (azar) en ambos.**
+  > El f1 alto de LONG es degenerado (clase mayoritaria "sube"). Cambié el gate
+  > de f1 a **ACCURACY ≥0.53** (no engañable por desbalance) → el pooled queda
+  > correctamente OFF, per-ticker sigue primario. Pooled tests 4/4 verde.
+
+### ⭐ CIERRE SPRINT 9 — 2026-05-30 (la verdad honesta)
+
+**Lo SÓLIDO (confiable, verificado):**
+- 9.1 target a horizonte ✅ — fix de lógica real (el target ahora es aprendible
+  en principio; antes predecía la próxima hora = ruido puro).
+- 9.2 infra pooled ✅ — módulo + wiring + warmup + tests + gate por accuracy.
+- Valuación/cuentas ✅ (de Sprints previos: ratios, CCL, FX) — esto SÍ está bien.
+- Performance ✅ — rankings/benchmarks cacheados <3ms; warmup cubre cold paths.
+
+**El HALLAZGO honesto (lo que hay que saber):**
+> **Ni el modelo per-ticker ni el pooled le ganan al azar en accuracy (~0.41-0.51).**
+> El f1 que se veía "ok" (0.58-0.71) es artefacto del desbalance de clases
+> (los mercados driftean para arriba → "predecir sube" saca f1 alto con accuracy
+> de azar). Esto NO es un bug: predecir dirección de un activo desde indicadores
+> técnicos es genuinamente cerca-de-imposible. La capa probabilística es débil.
+
+**Respuesta de ingeniería (sistema honesto, no maquillado):**
+- Warning nuevo en el motor: si accuracy < 0.52, avisa "no le gana al azar,
+  tratá la probabilidad como orientativa; priorizá determinístico + catalysts".
+- El pooled queda gateado off por accuracy (no se shippea algo peor).
+- Lo confiable para el user: motor determinístico (reglas), catalysts (earnings/
+  news con fuente), y la valuación del portfolio. La probabilidad es orientativa.
+
+**Qué falta para PROBAR edge (Sprint 10, el verdadero validador):**
+- Backtest del ranking vs SPY/plazo fijo + decision audit con retorno realizado.
+- Sin eso, ninguna mejora del modelo se puede declarar "buena" con datos.
+- Mejora futura del pooled (9.2b-future, opcional): walk-forward CV multi-fold,
+  target cross-sectional (¿supera a la mediana del universo?), features macro.
+
+**Sprint 9 se cierra con la verdad sobre la mesa: las cuentas están bien, la
+performance está bien, y el motor probabilístico es honestamente débil y ahora
+lo dice. El próximo paso real es Sprint 10 (backtest) para medir edge.**
   - Un solo modelo entrenado sobre features de TODO el universo (con ticker como
     feature o normalización cross-sectional), inferencia por ticker.
   - Arregla overfitting + mata los 65s del ranking (inferencia es ms, no s).
@@ -1314,19 +1364,36 @@ determinismo), nuevos tests del target/horizonte.
 
 ---
 
-## 4.11 · NEW SPRINT — Sprint 10 · Validación: probar que el motor tiene edge `[ ]`
+## 4.11 · NEW SPRINT — Sprint 10 · Validación: probar que el motor tiene edge `[~]`
 
 > Sin esto, el motor es una caja negra no validada. Es lo que convierte
 > "juguete lindo" en "tiene edge demostrable". Va junto con Sprint 9.
 
-- **10.1 · Decision audit loop completo (era 6.3)** `[ ]` — job offline
-  `realize_decisions` que completa `realized_return` N días después de cada
-  decisión guardada. Endpoint `GET /decisions/track-record`.
-- **10.2 · Backtest del ranking (era 6.9)** `[ ]` — "si seguías el top-3 del
-  ranking cada día, ¿qué pasaba?" vs SPY/Merval buy-and-hold + vs plazo fijo.
-  Métricas: cum return, max drawdown, hit rate, Sharpe, Calmar.
-- **10.3 · Track-record en UI** `[ ]` — panel que muestra el edge real (o la
-  falta de él, honestamente). Conectado a `/validation` (Brier) que ya existe.
+- **10.0 · Variación diaria en portfolio** `[x]` ← EXTRA pedido por el user
+  > ✅ DONE 2026-05-29. `PositionValuation.change_pct_1d` (fracción, ej. 0.014 = +1.4%).
+  > `_prev_close_cache` en `PortfolioService`, `_daily_change_pct(ticker)`.
+  > Badge bull/bear inline en el `<h3>` de cada holding card. 103/103 tests.
+
+- **10.1 · Decision audit loop completo (era 6.3)** `[x]`
+  > ✅ DONE 2026-05-29. `decisions.py`: `get_pending_decisions()`, `realize_decisions_job()`
+  > (yfinance histórico: precio en decided_at vs precio en decided_at+maturity),
+  > `compute_track_record(user_id)` → `TrackRecord` (hit_rate, avg_return, Sharpe,
+  > best/worst ticker, by_ticker). `HORIZON_MATURITY_DAYS = {short: 7, long: 30}`.
+  > `app.py`: `GET /decisions/track-record`, `POST /decisions/realize`.
+  > Warmup loop corre `realize_decisions_job()` cada 8 min automáticamente.
+  > 103/103 tests verde.
+
+- **10.2 · Backtest del ranking (era 6.9)** `[ ]` — PRÓXIMO A IMPLEMENTAR
+  > "si seguías el top-3 del ranking cada día, ¿qué pasaba?" vs SPY/Merval
+  > buy-and-hold + vs plazo fijo. Métricas: cum return, max drawdown, hit rate,
+  > Sharpe, Calmar. Ver spec completa en `docs/HANDOFF-2026-05-30.md` sección 6.
+  > **Archivos:** `brier.py` (walk_forward_with_dates), nuevo `backtest.py`,
+  > `app.py` (GET /backtest/ranking), SQLite (tabla backtest_cache).
+
+- **10.3 · Track-record en UI** `[ ]` — después de 10.2
+  > Panel "¿Tiene edge el motor?" en el workspace. Conectado a `/decisions/track-record`
+  > + `/backtest/ranking` + `/validation/{ticker}` (Brier, ya existe).
+  > **Archivos:** `app.js`, `index.html`, `styles.css`.
 
 ---
 
@@ -1354,6 +1421,77 @@ determinismo), nuevos tests del target/horizonte.
 - **12.2 · Deploy real con persistencia** `[ ]` — Heroku + Postgres (tenés créditos;
   Heroku borra el SQLite al reiniciar → migrar la capa DB). Reemplaza el túnel +
   Mac-prendida cuando deje de alcanzar.
+
+---
+
+## 4.14 · NEW SPRINT — Sprint 13 · Data viva + UX del análisis `[ ]`
+
+> Pedido del user 2026-05-30. Tres mejoras que el user marcó concretas.
+
+### 13.1 · Ratio CEDEAR en vivo desde BYMA (no tabla hardcodeada) `[ ]`
+
+**Problema:** `CANONICAL_CEDEAR_RATIOS` en `cedears.py` es una tabla estática.
+Los ratios CAMBIAN (el user vio que SPY cambió de ratio hoy). Una tabla fija
+queda desactualizada y vuelve el bug de valuación que ya arreglamos.
+
+**Plan:**
+- Fuente autoritativa del ratio: BYMA publica la grilla oficial de CEDEARs, o
+  Comafi (emisor) publica el "Programa CEDEAR" con ratios. Evaluar:
+  - BYMA open data / API si existe endpoint público de la grilla.
+  - Scrape de la tabla de Comafi (PDF/HTML del programa) como fallback.
+  - `byma-data` (pkg comunitario) si trae el ratio.
+- Nuevo módulo `packages/reference_data/.../cedear_ratios.py`: fetch + parse +
+  cache TTL ~24h (los ratios no cambian intra-día, pero sí entre días por splits).
+- `resolve_cedear_reference`: prioridad nueva → `user_supplied` → **`byma_live`**
+  → `canonical` (la tabla actual queda como fallback offline) → `parity` → `fallback`.
+- Soft-fail: si BYMA no responde, cae a la tabla canónica actual (no rompe).
+- Test: mock del fetch, confirmar que `byma_live` gana y que el fallback funciona.
+
+**DoD:** cuando BYMA cambia un ratio (ej. SPY), el sistema lo toma sin tocar código.
+
+### 13.2 · Reordenar el análisis + indicadores con hover (cards del learning) `[ ]`
+
+**Pedido del user:**
+1. El resumen/veredicto queda primero (como está).
+2. **El "market regime" se mueve al FINAL** (hoy está arriba y "no ayuda mucho").
+3. Que aparezcan los **conceptos del learning útiles** (RSI, MACD, volumen, ADX,
+   ATR, etc.) como cards, y **al pasar el mouse (hover) muestren la info + el
+   detalle/valor que dio ese indicador para ESTA acción**. Ej: hover en "RSI" →
+   tooltip con qué es el RSI (del glossary) + "RSI actual: 67 (acercándose a
+   sobrecompra)".
+
+**Plan (frontend, `apps/web/prototype/`):**
+- En `app.js` `renderAnalysis`/`renderWorkspace`: reordenar el DOM del workspace
+  para que `market-overview` (regime) se renderice al final del `analysis-grid`.
+- Nuevo bloque "Indicadores" entre el veredicto y los motores: una card por
+  indicador del `IndicatorSnapshot` (rsi, macd, adx, atr, volume_ratio, sma/ema...).
+- Cada card: nombre + valor actual + chip de lectura (sobrecompra/neutral/etc).
+- **Hover/focus** → tooltip que combina: (a) la definición del concepto desde
+  `GLOSSARY_TERMS` (matchear por id: "rsi", "macd", "adx"...), (b) el valor que
+  dio para este ticker + interpretación corta.
+- Reusar el patrón de tooltip/preview que ya existe en la sección Learning.
+- CSS: `.indicator-card` + `.indicator-tooltip` (reusar tokens; transición suave).
+- Mobile: el hover no existe → en touch, tap abre/cierra el tooltip.
+
+**DoD:** análisis de un ticker muestra veredicto → indicadores con hover
+explicativo (concepto + valor real) → motores → market regime al final.
+
+### 13.3 · Más hyperlinks (noticias clickeables, fuentes) `[ ]`
+
+**Pedido:** si se muestra una noticia, clickearla debe llevar a la fuente.
+
+**Plan:**
+- El news adapter (`reference_data/.../news.py`) ya trae `source_url` por item
+  (lo usa el catalyst REPORTED). Exponerlo en el response de `/news/{ticker}`
+  si no está, y en `app.js` `renderNews` envolver el titular en `<a href=url
+  target="_blank" rel="noopener noreferrer">`.
+- Aplicar el mismo criterio a otros lugares con fuente: earnings (link al release),
+  el `source_url` de catalysts en la card de análisis.
+- Seguridad: `rel="noopener noreferrer"`, `target="_blank"`, y truncar/validar que
+  la URL sea http(s).
+
+**DoD:** las noticias y catalysts con fuente son clickeables y abren la fuente
+en pestaña nueva de forma segura.
 
 ---
 

@@ -45,10 +45,27 @@ class PooledArtifact:
     bearish_means: pd.Series = field(default=None)
 
 
+_Z_CLIP = 5.0
+
+
+def _zscore_per_ticker(feats: pd.DataFrame) -> pd.DataFrame:
+    """Normalize each feature by THIS ticker's own mean/std (Sprint 9.2b).
+
+    Pooling raw features across 58 tickers mixes different scales/regimes, which
+    is why the first pooled model scored f1≈0.42. Z-scoring per ticker makes the
+    signals comparable across the universe. Inference must apply the SAME (this
+    ticker's own) normalization — see predict_pooled.
+    """
+    mu = feats.mean()
+    sd = feats.std(ddof=0).replace(0.0, 1.0)
+    return ((feats - mu) / sd).clip(lower=-_Z_CLIP, upper=_Z_CLIP)
+
+
 def build_pooled_dataset(adapter, universe: list[str], horizon: Horizon) -> pd.DataFrame:
     """Concatenate per-ticker (features + horizon target + date) across the universe.
 
     Soft-fails per ticker: a ticker that can't be fetched/featurised is skipped.
+    Features are z-scored per ticker (9.2b) so scales are comparable when pooled.
     Returns a DataFrame with feature columns + ``target`` + ``__date`` + ``__ticker``.
     """
     horizon_bars = target_horizon_bars(horizon)
@@ -57,7 +74,7 @@ def build_pooled_dataset(adapter, universe: list[str], horizon: Horizon) -> pd.D
         try:
             price_history = adapter.get_price_history(ticker.upper(), horizon)
             data = compute_indicators(price_history.frame)
-            feats = _build_feature_frame(data)
+            feats = _zscore_per_ticker(_build_feature_frame(data))
             aligned = data.loc[feats.index]
             target = (aligned["Close"].shift(-horizon_bars) > aligned["Close"]).astype(float)
             block = feats.join(target.rename("target")).dropna().copy()
@@ -166,7 +183,9 @@ def train_pooled_model(adapter, universe: list[str], horizon: Horizon) -> Pooled
 
 def predict_pooled(artifact: PooledArtifact, data: pd.DataFrame, horizon: Horizon) -> ProbabilisticSignal:
     """Infer probability_up for one ticker from its enriched price frame (ms)."""
-    feats = _build_feature_frame(data)
+    # Same per-ticker z-score as training (9.2b): normalize by THIS ticker's own
+    # full-history stats so the current row is comparable to what the model saw.
+    feats = _zscore_per_ticker(_build_feature_frame(data))
     current = feats.iloc[[-1]].reindex(columns=artifact.feature_columns)
     probability_up = float(artifact.model.predict_proba(current)[0][1])
 

@@ -17,11 +17,21 @@ common :func:`connection` helper.
 from __future__ import annotations
 
 import json
+import logging
+import math
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from .store import connection
+
+logger = logging.getLogger("market_bot.api")
+
+# Days after a decision before we consider it "mature" enough to realize.
+HORIZON_MATURITY_DAYS: dict[str, int] = {
+    "short": 7,
+    "long": 30,
+}
 
 
 SCHEMA = """
@@ -183,6 +193,185 @@ def _row_to_record(row) -> DecisionRecord:
         decided_at=datetime.fromisoformat(str(row["decided_at"])),
         realized_return=float(row["realized_return"]) if row["realized_return"] is not None else None,
         realized_at=datetime.fromisoformat(str(realized_at)) if realized_at else None,
+    )
+
+
+def get_pending_decisions() -> list[DecisionRecord]:
+    """Return decisions across all users that are mature but not yet realized."""
+    ensure_decisions_schema()
+    cutoffs: list[tuple[str, str]] = [
+        (horizon, (datetime.utcnow() - timedelta(days=days)).isoformat())
+        for horizon, days in HORIZON_MATURITY_DAYS.items()
+    ]
+    rows: list[Any] = []
+    with connection() as conn:
+        for horizon, cutoff in cutoffs:
+            rows.extend(
+                conn.execute(
+                    """
+                    SELECT id, user_id, ticker, horizon, action_taken, conviction, rationale,
+                           analysis_snapshot_json, decided_at, realized_return, realized_at
+                    FROM user_decisions
+                    WHERE realized_return IS NULL
+                      AND horizon = ?
+                      AND decided_at <= ?
+                    ORDER BY decided_at ASC
+                    LIMIT 500
+                    """,
+                    (horizon, cutoff),
+                ).fetchall()
+            )
+    return [_row_to_record(row) for row in rows]
+
+
+def realize_decisions_job() -> dict[str, int]:
+    """Fetch historical prices for pending decisions and persist realized returns.
+
+    Safe to call repeatedly — skips decisions that are already realized.
+    Returns counts of {realized, skipped, errors}.
+    """
+    try:
+        import yfinance as yf  # noqa: PLC0415
+    except ModuleNotFoundError:
+        logger.warning("realize_decisions_job: yfinance not installed, skipping")
+        return {"realized": 0, "skipped": 0, "errors": 0}
+
+    pending = get_pending_decisions()
+    if not pending:
+        return {"realized": 0, "skipped": 0, "errors": 0}
+
+    realized = skipped = errors = 0
+    for rec in pending:
+        try:
+            maturity = HORIZON_MATURITY_DAYS.get(rec.horizon.lower(), 7)
+            decision_date = rec.decided_at.date()
+            end_date = decision_date + timedelta(days=maturity + 5)  # +5 buffer for weekends
+            if end_date > date.today():
+                skipped += 1
+                continue
+
+            frame = yf.download(
+                rec.ticker,
+                start=decision_date.isoformat(),
+                end=end_date.isoformat(),
+                interval="1d",
+                auto_adjust=True,
+                progress=False,
+            )
+            if frame.empty or len(frame) < 2:
+                skipped += 1
+                continue
+            try:
+                import pandas as _pd  # noqa: PLC0415
+                if isinstance(frame.columns, _pd.MultiIndex):
+                    frame.columns = frame.columns.get_level_values(0)
+            except Exception:
+                pass
+
+            price_at_decision = float(frame.iloc[0]["Close"])
+            price_at_maturity = float(frame.iloc[-1]["Close"])
+            if price_at_decision <= 0:
+                skipped += 1
+                continue
+
+            ret = (price_at_maturity - price_at_decision) / price_at_decision
+            update_realized_return(rec.decision_id, ret)
+            realized += 1
+        except Exception as exc:
+            logger.warning("realize_decisions_job: error for decision %d: %s", rec.decision_id, exc)
+            errors += 1
+
+    logger.info(
+        "realize_decisions_job done: realized=%d skipped=%d errors=%d",
+        realized, skipped, errors,
+    )
+    return {"realized": realized, "skipped": skipped, "errors": errors}
+
+
+@dataclass
+class TrackRecord:
+    n_realized: int
+    n_pending: int
+    hit_rate: float | None       # fraction of realized decisions with return > 0
+    avg_return: float | None     # mean realized return
+    sharpe: float | None         # avg / std if >= 3 data points
+    best_ticker: str | None
+    worst_ticker: str | None
+    by_ticker: list[dict[str, Any]]
+
+
+def compute_track_record(user_id: int) -> TrackRecord:
+    """Aggregate realized decisions for a user into a track record."""
+    ensure_decisions_schema()
+    with connection() as conn:
+        all_rows = conn.execute(
+            """
+            SELECT ticker, horizon, action_taken, realized_return, decided_at
+            FROM user_decisions
+            WHERE user_id = ?
+            ORDER BY decided_at DESC
+            """,
+            (user_id,),
+        ).fetchall()
+
+    realized = [r for r in all_rows if r["realized_return"] is not None]
+    pending = [r for r in all_rows if r["realized_return"] is None]
+
+    if not realized:
+        return TrackRecord(
+            n_realized=0,
+            n_pending=len(pending),
+            hit_rate=None,
+            avg_return=None,
+            sharpe=None,
+            best_ticker=None,
+            worst_ticker=None,
+            by_ticker=[],
+        )
+
+    returns = [float(r["realized_return"]) for r in realized]
+    n = len(returns)
+    avg = sum(returns) / n
+    hits = sum(1 for r in returns if r > 0)
+
+    sharpe: float | None = None
+    if n >= 3:
+        variance = sum((r - avg) ** 2 for r in returns) / (n - 1)
+        std = math.sqrt(variance) if variance > 0 else 0.0
+        sharpe = round(avg / std, 3) if std > 0 else None
+
+    # Per-ticker aggregation
+    from collections import defaultdict
+    ticker_returns: dict[str, list[float]] = defaultdict(list)
+    for r in realized:
+        ticker_returns[str(r["ticker"])].append(float(r["realized_return"]))
+
+    by_ticker = sorted(
+        [
+            {
+                "ticker": t,
+                "n": len(rets),
+                "avg_return": round(sum(rets) / len(rets), 4),
+                "hit_rate": round(sum(1 for r in rets if r > 0) / len(rets), 3),
+            }
+            for t, rets in ticker_returns.items()
+        ],
+        key=lambda x: x["avg_return"],
+        reverse=True,
+    )
+
+    best = by_ticker[0]["ticker"] if by_ticker else None
+    worst = by_ticker[-1]["ticker"] if by_ticker else None
+
+    return TrackRecord(
+        n_realized=n,
+        n_pending=len(pending),
+        hit_rate=round(hits / n, 3),
+        avg_return=round(avg, 4),
+        sharpe=sharpe,
+        best_ticker=best,
+        worst_ticker=worst,
+        by_ticker=by_ticker,
     )
 
 

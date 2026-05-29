@@ -237,6 +237,27 @@ class CedearReference:
     ratio_source: str
 
 
+def _live_cedear_ratio(symbol: str) -> float | None:
+    """Soft, lazy lookup of the live issuer ratio grid.
+
+    Imported lazily so portfolio never hard-depends on reference_data being
+    importable in every context (and to avoid an import cycle). Any failure —
+    import error or soft-fail empty grid — degrades silently to ``None`` so the
+    caller falls through to the canonical static table.
+    """
+    try:
+        from market_reference.cedear_ratios import live_cedear_ratio
+    except Exception:  # noqa: BLE001 - degrade to canonical if unavailable
+        return None
+    try:
+        ratio = live_cedear_ratio(symbol)
+    except Exception:  # noqa: BLE001 - never let live data break valuation
+        return None
+    if ratio is not None and ratio > 0:
+        return float(ratio)
+    return None
+
+
 def build_byma_symbol(symbol: str) -> str:
     base_symbol = (
         normalize_cedear_symbol(symbol)
@@ -259,12 +280,18 @@ def resolve_cedear_reference(
     """Resolve the CEDEAR ratio with a hard ordering:
 
     1. ``user_supplied`` — the user explicitly told us the ratio (highest trust).
-    2. ``canonical`` — looked up in ``CANONICAL_CEDEAR_RATIOS``. Use this when
-       known: parity inference is unreliable for tickers like GOOGL where the
-       true ratio (58) is far from a common candidate near observed parity (24).
-    3. ``estimated_market_parity`` — derived from live prices. Used when we
+    2. ``byma_live`` — the live issuer-published ratio grid (Comafi "Programa
+       CEDEAR" via ``market_reference.cedear_ratios``). Preferred over the
+       static table because issuer ratios change on corporate actions (e.g.
+       SPY re-strike) and a hardcoded table silently goes stale. Soft-fails to
+       the canonical table if the live fetch is unavailable/empty.
+    3. ``canonical`` — looked up in ``CANONICAL_CEDEAR_RATIOS`` (now a FALLBACK
+       behind the live source). Still beats parity inference, which is
+       unreliable for tickers like GOOGL where the true ratio (58) is far from
+       a common candidate near observed parity (24).
+    4. ``estimated_market_parity`` — derived from live prices. Used when we
        don't have the ticker in the canonical table.
-    4. ``fallback_default`` — last resort. Returns ratio=1.0 so the caller
+    5. ``fallback_default`` — last resort. Returns ratio=1.0 so the caller
        can still render *something*, but flags it so the UI / valuation
        layer can warn loudly. Never silently trust this value.
     """
@@ -279,6 +306,18 @@ def resolve_cedear_reference(
             byma_symbol=byma_symbol,
             cedear_ratio=float(user_ratio),
             ratio_source="user_supplied",
+        )
+
+    # Live issuer grid wins over the static table: ratios change on corporate
+    # actions and the hardcoded table goes stale. Soft-fails to canonical.
+    live_ratio = _live_cedear_ratio(normalized_symbol) or _live_cedear_ratio(resolved_underlying)
+    if live_ratio is not None and live_ratio > 0:
+        return CedearReference(
+            symbol=normalized_symbol,
+            underlying_ticker=resolved_underlying,
+            byma_symbol=byma_symbol,
+            cedear_ratio=float(live_ratio),
+            ratio_source="byma_live",
         )
 
     # Canonical table is preferred over parity inference. Parity snaps to a

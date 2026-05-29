@@ -41,6 +41,9 @@ class PortfolioService:
         # 15-min TTL: yfinance daily closes are EOD, so caching ~quarter-hour
         # is safe and cuts repeat /portfolio/summary calls to a no-op.
         self._quote_cache: TTLCache[tuple[float, date]] = TTLCache(ttl_seconds=900)
+        # Previous-day close stored alongside the current quote so we can
+        # compute intra-day change % without an extra network round-trip.
+        self._prev_close_cache: TTLCache[float] = TTLCache(ttl_seconds=900)
         self._ensure_schema()
 
     def add_position(
@@ -624,6 +627,7 @@ class PortfolioService:
         if position.instrument_type == "cedear":
             local_symbol = position.byma_symbol or build_byma_symbol(position.symbol)
             local_price_ars, quote_date = self._latest_close(local_symbol)
+            change_pct_1d = self._daily_change_pct(local_symbol)
             underlying_price_usd, _ = self._latest_close(position.underlying_ticker)
             current_value_ars = position.quantity * local_price_ars
             # USD value for CEDEAR uses CCL conversion of the ARS market value.
@@ -650,6 +654,7 @@ class PortfolioService:
                 )
         else:
             underlying_price_usd, quote_date = self._latest_close(position.underlying_ticker)
+            change_pct_1d = self._daily_change_pct(position.underlying_ticker)
             current_value_usd = position.quantity * underlying_price_usd
             current_value_ars = current_value_usd * current_fx
             current_price = underlying_price_usd
@@ -710,6 +715,7 @@ class PortfolioService:
             real_return_pct=round(_safe_return(current_value_ars, inflation_track), 4),
             preferred_benchmark_return_pct=round(preferred_return, 4),
             preferred_benchmark_label=preferred_label,
+            change_pct_1d=round(change_pct_1d, 4),
             benchmark_comparisons=comparisons,
             notes=notes,
         )
@@ -855,7 +861,23 @@ class PortfolioService:
         latest_row = frame.iloc[-1]
         latest_index = frame.index[-1]
         quote = (float(latest_row["Close"]), pd.Timestamp(latest_index).date())
+        if len(frame) >= 2:
+            prev_close = float(frame.iloc[-2]["Close"])
+            self._prev_close_cache.set(normalized_ticker, prev_close)
         return self._quote_cache.set(normalized_ticker, quote)
+
+    def _daily_change_pct(self, ticker: str) -> float:
+        """Return today's price change vs yesterday's close as a fraction (e.g. 0.014 = +1.4%).
+
+        Returns 0.0 when data is unavailable so callers never get an exception.
+        _latest_close must have been called for this ticker first (populates prev cache).
+        """
+        normalized_ticker = normalize_quote_symbol(ticker)
+        current = self._quote_cache.get(normalized_ticker)
+        prev = self._prev_close_cache.get(normalized_ticker)
+        if current is None or prev is None or prev == 0:
+            return 0.0
+        return (current[0] - prev) / prev
 
     def _ensure_schema(self) -> None:
         with connection() as conn:

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
 import unicodedata
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,6 +36,7 @@ from market_identity import (  # noqa: E402
     list_decisions,
     record_decision,
 )
+from market_identity.decisions import compute_track_record, realize_decisions_job  # noqa: E402
 from market_identity.service import IdentityError  # noqa: E402
 from market_portfolio import BalanzImportSkip, PortfolioError, PortfolioService, parse_balanz_extract  # noqa: E402
 from market_reference import (  # noqa: E402
@@ -46,6 +48,9 @@ from market_reference import (  # noqa: E402
 )
 
 from .schemas import (  # noqa: E402
+    AiAnalysisCitationResponse,
+    AiAnalysisRequest,
+    AiAnalysisResponse,
     AnalyzeRequest,
     BalanzImportResponse,
     BalanzImportSkipResponse,
@@ -74,6 +79,7 @@ from .schemas import (  # noqa: E402
     UniverseItemResponse,
     ValidationReportResponse,
 )
+from .gemini_analysis_client import AiAnalysisResult, GeminiAnalysisClient  # noqa: E402
 
 app = FastAPI(
     title="Market Bot API",
@@ -85,6 +91,7 @@ benchmark_service = ArgentinaBenchmarkService()
 service = MarketBotService()
 identity_service = IdentityService()
 portfolio_service = PortfolioService(benchmark_service=benchmark_service)
+gemini_analysis_client = GeminiAnalysisClient()
 
 MARKET_OVERVIEW_UNIVERSE = (
     {"symbol": "SPY", "label": "S&P 500", "category": "indices"},
@@ -179,6 +186,29 @@ def _warm_rankings_cache() -> None:
             # would make the ranking's numbers diverge from the detail view.
             # (See docs/plan-tester-ready.md — decision against 1A.3.)
             for horizon in (Horizon.SHORT, Horizon.LONG):
+                # Sprint 9.2: train the pooled model once per horizon BEFORE the
+                # rankings, so the ranking's 60 tickers are ms-inference instead
+                # of 60 per-ticker RF trainings (this is what kills the ~65s).
+                try:
+                    started = _time.perf_counter()
+                    artifact = service.ensure_pooled_artifact(horizon)
+                    elapsed = int((_time.perf_counter() - started) * 1000)
+                    api_logger.info(
+                        "pooled train done",
+                        extra={
+                            "horizon": horizon.value,
+                            "elapsed_ms": elapsed,
+                            "ok": artifact is not None,
+                            "f1": getattr(getattr(artifact, "validation", None), "f1", None),
+                            "n_tickers": getattr(artifact, "n_tickers", None),
+                        },
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    api_logger.info(
+                        "pooled train failed",
+                        extra={"horizon": horizon.value, "error": str(exc)},
+                    )
+
                 for warm_mode in ("default", "opportunities"):
                     try:
                         started = _time.perf_counter()
@@ -209,6 +239,14 @@ def _warm_rankings_cache() -> None:
                 except Exception as exc:  # noqa: BLE001
                     api_logger.info("analyze warmup failed", extra={"ticker": ticker, "error": str(exc)})
 
+            # Realize any pending decisions that have crossed their maturity window.
+            try:
+                result = realize_decisions_job()
+                if result["realized"] > 0:
+                    api_logger.info("realize_decisions done", extra=result)
+            except Exception as exc:  # noqa: BLE001
+                api_logger.info("realize_decisions failed", extra={"error": str(exc)})
+
             _time.sleep(480)
 
     threading.Thread(target=_warm, name="rankings-warmup", daemon=True).start()
@@ -221,10 +259,12 @@ EARNINGS_CACHE: TTLCache[list[EarningsEventResponse]] = TTLCache(ttl_seconds=900
 # upstream call is expensive (one yfinance fetch + price history). Cache for 24h
 # in a dedicated bucket so it never collides with the upcoming-events cache.
 EARNINGS_HISTORY_CACHE: TTLCache[EarningsHistoryResponse] = TTLCache(ttl_seconds=24 * 60 * 60)
+AI_ANALYSIS_CACHE: TTLCache[AiAnalysisResponse] = TTLCache(ttl_seconds=180)
 
 # Rate limit dependencies — declared once so the same instances are reused.
 REGISTER_RATE_LIMIT = rate_limit(key="auth_register", max_hits=3, window_seconds=60 * 60)
 ANALYZE_RATE_LIMIT = rate_limit(key="analyze", max_hits=30, window_seconds=60)
+AI_ANALYZE_RATE_LIMIT = rate_limit(key="analyze_ai", max_hits=10, window_seconds=60)
 
 app.mount("/app", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
 
@@ -306,6 +346,251 @@ def _earnings_events_response(events) -> list[EarningsEventResponse]:
         )
         for event in events
     ]
+
+
+def _market_overview_cached(
+    ticker: Optional[str],
+    horizon: Horizon,
+) -> MarketOverviewResponse:
+    cache_key = (ticker, horizon.value)
+    cached = MARKET_OVERVIEW_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    overview = _build_market_overview(ticker=ticker, horizon=horizon)
+    MARKET_OVERVIEW_CACHE.set(cache_key, overview)
+    return overview
+
+
+def _news_for_ticker_cached(ticker: str) -> list[NewsItemResponse]:
+    normalized_ticker = ticker.upper()
+    cache_key = ("news", normalized_ticker)
+    cached = NEWS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    cached = _news_items_response(fetch_news(normalized_ticker))
+    NEWS_CACHE.set(cache_key, cached)
+    return cached
+
+
+def _earnings_for_ticker_cached(ticker: str, days_ahead: int = 180) -> list[EarningsEventResponse]:
+    normalized_ticker = ticker.upper()
+    cache_key = ("ticker", normalized_ticker, days_ahead)
+    cached = EARNINGS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    events = upcoming_earnings([normalized_ticker], days_ahead=days_ahead)
+    cached = _earnings_events_response(events)
+    EARNINGS_CACHE.set(cache_key, cached)
+    return cached
+
+
+def _earnings_history_cached(ticker: str, limit: int = 8) -> EarningsHistoryResponse:
+    normalized_ticker = ticker.upper()
+    cache_key = ("history", normalized_ticker, limit)
+    cached = EARNINGS_HISTORY_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        rows = fetch_earnings_history(normalized_ticker, limit=limit)
+    except Exception:
+        rows = []
+    events = [EarningsHistoryEventResponse(**row) for row in rows]
+    cached = EarningsHistoryResponse(ticker=normalized_ticker, events=events)
+    EARNINGS_HISTORY_CACHE.set(cache_key, cached)
+    return cached
+
+
+def _compact_analysis_context(analysis: TickerAnalysisResponse) -> dict[str, Any]:
+    return {
+        "ticker": analysis.ticker,
+        "horizon": analysis.horizon,
+        "generated_at": analysis.generated_at.isoformat(),
+        "setup": {
+            "direction": analysis.deterministic.direction,
+            "score": analysis.deterministic.score,
+            "regime": analysis.deterministic.regime,
+            "name": analysis.deterministic.setup_name,
+            "reasons": analysis.deterministic.reasons[:5],
+            "invalidation": analysis.deterministic.invalidation,
+            "stop_loss": analysis.deterministic.stop_loss,
+            "take_profit": analysis.deterministic.take_profit,
+        },
+        "indicators": analysis.indicators.model_dump(mode="json", exclude_none=True),
+        "probabilistic": {
+            "confidence": analysis.probabilistic.confidence,
+            "probability_up": analysis.probabilistic.probability_up,
+            "dominant_features": analysis.probabilistic.dominant_features[:6],
+            "warnings": analysis.probabilistic.warnings[:6],
+            "scenarios": [
+                scenario.model_dump(mode="json")
+                for scenario in analysis.probabilistic.scenarios[:3]
+            ],
+        },
+        "actions": [
+            action.model_dump(mode="json")
+            for action in analysis.actions[:3]
+        ],
+        "catalysts": [
+            catalyst.model_dump(mode="json", exclude_none=True)
+            for catalyst in analysis.catalysts[:6]
+        ],
+        "guardrails": analysis.guardrails[:6],
+        "validation": analysis.validation.model_dump(mode="json") if analysis.validation else None,
+        "backtest": analysis.backtest.model_dump(mode="json") if analysis.backtest else None,
+    }
+
+
+def _build_ai_analysis_context(
+    *,
+    ticker: str,
+    horizon: Horizon,
+    current_user: Optional[AuthenticatedUser],
+) -> tuple[dict[str, Any], bool]:
+    normalized_ticker = ticker.upper()
+    analysis = TickerAnalysisResponse.model_validate(
+        service.analyze_ticker(normalized_ticker, horizon),
+        from_attributes=True,
+    )
+    market = _market_overview_cached(normalized_ticker, horizon)
+    news = _news_for_ticker_cached(normalized_ticker)[:6]
+    earnings = _earnings_for_ticker_cached(normalized_ticker, days_ahead=180)[:4]
+    earnings_history = _earnings_history_cached(normalized_ticker, limit=8)
+
+    context: dict[str, Any] = {
+        "ticker": normalized_ticker,
+        "horizon": horizon.value,
+        "analysis": _compact_analysis_context(analysis),
+        "market_context": market.model_dump(mode="json", exclude_none=True) if hasattr(market, "model_dump") else market,
+        "news_context": [item.model_dump(mode="json", exclude_none=True) for item in news],
+        "earnings_context": {
+            "upcoming": [item.model_dump(mode="json", exclude_none=True) for item in earnings],
+            "history": earnings_history.model_dump(mode="json", exclude_none=True)["events"],
+        },
+    }
+
+    if current_user is None:
+        return context, False
+
+    profile = identity_service.get_profile(current_user.user_id)
+    context["profile"] = InvestorProfileResponse.model_validate(
+        profile,
+        from_attributes=True,
+    ).model_dump(mode="json")
+    try:
+        summary = portfolio_service.portfolio_summary(
+            current_user.user_id,
+            profile.benchmark_preference,
+            risk_tolerance=profile.risk_tolerance,
+        )
+        matching_positions = [
+            position
+            for position in summary.positions
+            if position.symbol.upper() == normalized_ticker
+            or position.underlying_ticker.upper() == normalized_ticker
+        ]
+        context["portfolio_context"] = {
+            "owns_ticker": bool(matching_positions),
+            "portfolio_totals": {
+                "positions_count": summary.positions_count,
+                "total_value_ars": summary.total_value_ars,
+                "total_value_usd": summary.total_value_usd,
+                "total_pnl_ars": summary.total_pnl_ars,
+                "total_pnl_usd": summary.total_pnl_usd,
+                "total_real_return_pct": summary.total_real_return_pct,
+                "preferred_benchmark_label": summary.preferred_benchmark_label,
+                "total_preferred_benchmark_return_pct": summary.total_preferred_benchmark_return_pct,
+            },
+            "matching_positions": [
+                {
+                    "symbol": position.symbol,
+                    "instrument_type": position.instrument_type,
+                    "quantity": position.quantity,
+                    "purchase_date": position.purchase_date.isoformat(),
+                    "purchase_currency": position.purchase_currency,
+                    "purchase_price": position.purchase_price,
+                    "current_value_ars": position.current_value_ars,
+                    "current_value_usd": position.current_value_usd,
+                    "pnl_ars": position.pnl_ars,
+                    "pnl_usd": position.pnl_usd,
+                    "return_pct_ars": position.return_pct_ars,
+                    "return_pct_usd": position.return_pct_usd,
+                    "real_return_pct": position.real_return_pct,
+                    "cedear_ratio": position.cedear_ratio,
+                    "cedear_ratio_source": position.cedear_ratio_source,
+                }
+                for position in matching_positions[:3]
+            ],
+            "top_sector_exposure": [
+                {"label": bucket.label, "pct": bucket.pct}
+                for bucket in summary.sector_exposure[:3]
+            ],
+            "top_region_exposure": [
+                {"label": bucket.label, "pct": bucket.pct}
+                for bucket in summary.region_exposure[:3]
+            ],
+        }
+    except Exception:
+        context["portfolio_context"] = {
+            "error": "No se pudo consolidar el portfolio del usuario.",
+        }
+    return context, True
+
+
+def _build_ai_prompts(context: dict[str, Any]) -> tuple[str, str]:
+    system_prompt = (
+        "Sos un analista financiero enfocado en acciones y CEDEARs para un inversor argentino. "
+        "Usá el contexto estructurado provisto como fuente principal y complementalo con búsqueda web "
+        "solo para información externa reciente y relevante. Distinguí con claridad hechos confirmados, "
+        "señales del mercado, inferencias y rumores. Nunca inventes contratos, earnings o eventos. "
+        "Respondé en español, en markdown claro, con tono ejecutivo. El modelo subyacente es Gemini 2.5 Pro."
+    )
+    user_prompt = (
+        "Analizá este setup y enriquecelo con contexto externo reciente.\n\n"
+        "Objetivo:\n"
+        "- sintetizar el setup técnico y probabilístico\n"
+        "- detectar noticias, contratos, regulación, cambios de fundamentales, earnings, eventos macro o sectoriales\n"
+        "- marcar si el caso cambia entre corto y largo plazo según el horizonte pedido\n"
+        "- explicar qué confirma la tesis y qué la invalida\n"
+        "- si hay rumores, etiquetarlos como rumores y no tratarlos como hechos\n\n"
+        "Formato de salida:\n"
+        "## Lectura del setup\n"
+        "## Qué cambió afuera del gráfico\n"
+        "## Earnings y riesgos de evento\n"
+        "## Tesis operativa para este horizonte\n"
+        "## Qué invalidaría la idea\n"
+        "## Veredicto AI\n\n"
+        "En el veredicto final cerrá con una postura concreta (alcista, neutral o bajista) "
+        "y con 3 bullets de mayor peso.\n\n"
+        f"Contexto estructurado:\n```json\n{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}\n```"
+    )
+    return system_prompt, user_prompt
+
+
+def _ai_response(
+    *,
+    ticker: str,
+    horizon: Horizon,
+    used_profile_context: bool,
+    result: AiAnalysisResult,
+) -> AiAnalysisResponse:
+    return AiAnalysisResponse(
+        ticker=ticker,
+        horizon=horizon.value,
+        provider=result.provider,
+        model=result.model,
+        content=result.content,
+        citations=[
+            AiAnalysisCitationResponse(
+                title=item.title,
+                url=item.url,
+                source=item.source,
+                published_at=item.published_at,
+            )
+            for item in result.citations
+        ],
+        generated_at=datetime.utcnow(),
+        used_profile_context=used_profile_context,
+    )
 
 
 @app.get("/", include_in_schema=False)
@@ -665,6 +950,74 @@ def analyze(request: AnalyzeRequest) -> TickerAnalysisResponse:
     return TickerAnalysisResponse.model_validate(analysis, from_attributes=True)
 
 
+@app.post(
+    "/analyze/ai",
+    response_model=AiAnalysisResponse,
+    dependencies=[Depends(AI_ANALYZE_RATE_LIMIT)],
+)
+def analyze_with_ai(
+    request: AiAnalysisRequest,
+    current_user: Optional[AuthenticatedUser] = Depends(get_optional_user),
+) -> AiAnalysisResponse:
+    if not gemini_analysis_client.is_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Gemini no está configurado.",
+        )
+
+    started_at = time.perf_counter()
+    ticker = request.ticker.upper()
+    horizon = Horizon(request.horizon)
+    user_key = current_user.user_id if current_user is not None else 0
+    cache_key = (ticker, horizon.value, user_key)
+    cached = AI_ANALYSIS_CACHE.get(cache_key)
+    if cached is not None:
+        _log_endpoint_timing(
+            "analyze_ai",
+            started_at,
+            ticker=ticker,
+            horizon=horizon.value,
+            cache_hit=True,
+            personalized=bool(current_user),
+        )
+        return cached
+
+    try:
+        context, used_profile_context = _build_ai_analysis_context(
+            ticker=ticker,
+            horizon=horizon,
+            current_user=current_user,
+        )
+        system_prompt, user_prompt = _build_ai_prompts(context)
+        result = gemini_analysis_client.analyze(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
+    except MarketDataError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    response = _ai_response(
+        ticker=ticker,
+        horizon=horizon,
+        used_profile_context=used_profile_context,
+        result=result,
+    )
+    AI_ANALYSIS_CACHE.set(cache_key, response)
+    _log_endpoint_timing(
+        "analyze_ai",
+        started_at,
+        ticker=ticker,
+        horizon=horizon.value,
+        cache_hit=False,
+        personalized=used_profile_context,
+        citations=len(response.citations),
+        provider=response.provider,
+    )
+    return response
+
+
 @app.get("/rankings", response_model=list[RankingItemResponse])
 def rankings(
     horizon: str = Query(default="short", pattern="^(short|long)$"),
@@ -856,6 +1209,42 @@ def list_my_decisions(
     ]
 
 
+@app.get("/decisions/track-record")
+def decisions_track_record(
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> dict:
+    """Return aggregated track record for the current user's realized decisions.
+
+    Clients should call ``POST /decisions/realize`` first (or wait for the
+    background job) so that mature decisions have their ``realized_return``
+    populated before reading this endpoint.
+    """
+    record = compute_track_record(current_user.user_id)
+    return {
+        "n_realized": record.n_realized,
+        "n_pending": record.n_pending,
+        "hit_rate": record.hit_rate,
+        "avg_return": record.avg_return,
+        "sharpe": record.sharpe,
+        "best_ticker": record.best_ticker,
+        "worst_ticker": record.worst_ticker,
+        "by_ticker": record.by_ticker,
+    }
+
+
+@app.post("/decisions/realize")
+def trigger_realize_decisions(
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> dict:
+    """Manually trigger the realize-decisions job for all pending decisions.
+
+    Safe to call repeatedly. Runs synchronously (may take a few seconds if
+    there are many pending decisions with yfinance fetches). The background
+    warmup also runs this automatically.
+    """
+    return realize_decisions_job()
+
+
 @app.get("/news/{ticker}", response_model=list[NewsItemResponse])
 def news_for_ticker(
     ticker: str,
@@ -864,11 +1253,8 @@ def news_for_ticker(
     started_at = time.perf_counter()
     normalized_ticker = ticker.upper()
     cache_key = ("news", normalized_ticker)
-    cached = NEWS_CACHE.get(cache_key)
-    cache_hit = cached is not None
-    if cached is None:
-        cached = _news_items_response(fetch_news(normalized_ticker))
-        NEWS_CACHE.set(cache_key, cached)
+    cache_hit = NEWS_CACHE.get(cache_key) is not None
+    cached = _news_for_ticker_cached(normalized_ticker)
     _log_endpoint_timing("news", started_at, ticker=normalized_ticker, limit=limit, cache_hit=cache_hit)
     return cached[:limit]
 
@@ -881,12 +1267,8 @@ def earnings_for_ticker(
     started_at = time.perf_counter()
     normalized_ticker = ticker.upper()
     cache_key = ("ticker", normalized_ticker, days_ahead)
-    cached = EARNINGS_CACHE.get(cache_key)
-    cache_hit = cached is not None
-    if cached is None:
-        events = upcoming_earnings([normalized_ticker], days_ahead=days_ahead)
-        cached = _earnings_events_response(events)
-        EARNINGS_CACHE.set(cache_key, cached)
+    cache_hit = EARNINGS_CACHE.get(cache_key) is not None
+    cached = _earnings_for_ticker_cached(normalized_ticker, days_ahead=days_ahead)
     _log_endpoint_timing(
         "earnings_ticker",
         started_at,
@@ -913,16 +1295,8 @@ def earnings_history_for_ticker(
     started_at = time.perf_counter()
     normalized_ticker = ticker.upper()
     cache_key = ("history", normalized_ticker, limit)
-    cached = EARNINGS_HISTORY_CACHE.get(cache_key)
-    cache_hit = cached is not None
-    if cached is None:
-        try:
-            rows = fetch_earnings_history(normalized_ticker, limit=limit)
-        except Exception:  # pragma: no cover — defensive, adapter already soft-fails
-            rows = []
-        events = [EarningsHistoryEventResponse(**row) for row in rows]
-        cached = EarningsHistoryResponse(ticker=normalized_ticker, events=events)
-        EARNINGS_HISTORY_CACHE.set(cache_key, cached)
+    cache_hit = EARNINGS_HISTORY_CACHE.get(cache_key) is not None
+    cached = _earnings_history_cached(normalized_ticker, limit=limit)
     _log_endpoint_timing(
         "earnings_history",
         started_at,
@@ -941,9 +1315,8 @@ def market_overview(
     started_at = time.perf_counter()
     normalized_ticker = ticker.upper() if ticker else None
     cache_key = (normalized_ticker, horizon)
-    cached = MARKET_OVERVIEW_CACHE.get(cache_key)
-    cache_hit = cached is not None
-    if cached is not None:
+    cache_hit = MARKET_OVERVIEW_CACHE.get(cache_key) is not None
+    if cache_hit:
         _log_endpoint_timing(
             "market_overview",
             started_at,
@@ -951,15 +1324,11 @@ def market_overview(
             horizon=horizon,
             cache_hit=cache_hit,
         )
-        return cached
+        return _market_overview_cached(normalized_ticker, Horizon(horizon))
     try:
-        overview = _build_market_overview(
-            ticker=normalized_ticker,
-            horizon=Horizon(horizon),
-        )
+        overview = _market_overview_cached(normalized_ticker, Horizon(horizon))
     except MarketDataError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    MARKET_OVERVIEW_CACHE.set(cache_key, overview)
     _log_endpoint_timing(
         "market_overview",
         started_at,

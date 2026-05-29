@@ -15,7 +15,13 @@ from .contracts import (
 from .backtesting import run_long_only_backtest
 from .data import InstrumentContext, MarketDataAdapter, MarketDataError, YFinanceMarketDataAdapter
 from .indicators import build_indicator_snapshot, compute_indicators
-from .models import generate_probabilistic_signal, target_horizon_bars
+from .models import (
+    PooledArtifact,
+    generate_probabilistic_signal,
+    predict_pooled,
+    target_horizon_bars,
+    train_pooled_model,
+)
 from .signals import generate_deterministic_signal
 from .strategies import (
     ProfileFilter,
@@ -45,6 +51,61 @@ class MarketBotService:
         self._rankings_cache: TTLCache[list[tuple[TickerAnalysis, float, list[str]]]] = TTLCache(
             ttl_seconds=600
         )
+        # Sprint 9.2: pooled model artifact per horizon (trained once, reused for
+        # all tickers → ms inference instead of per-ticker RF training). 6h TTL.
+        # A lock so the ranking ThreadPool can't trigger N concurrent trainings.
+        import threading
+
+        self._pooled_cache: TTLCache[PooledArtifact] = TTLCache(ttl_seconds=21_600)
+        self._pooled_lock = threading.Lock()
+
+    def _get_cached_pooled(self, horizon: Horizon) -> PooledArtifact | None:
+        """Non-blocking read of the pooled artifact. analyze_ticker uses this so
+        a request NEVER blocks on training; the warmup trains it in background."""
+        return self._pooled_cache.get(horizon.value)
+
+    def ensure_pooled_artifact(
+        self, horizon: Horizon, universe: list[str] | None = None
+    ) -> PooledArtifact | None:
+        """Train + cache the pooled artifact if missing. Called by the warmup.
+        Behind a lock so concurrent callers don't all train. Soft-fails to None."""
+        cached = self._pooled_cache.get(horizon.value)
+        if cached is not None:
+            return cached
+        with self._pooled_lock:
+            cached = self._pooled_cache.get(horizon.value)
+            if cached is not None:
+                return cached
+            uni = universe or SUGGESTION_UNIVERSE
+            try:
+                artifact = train_pooled_model(self.adapter, uni, horizon)
+            except Exception:
+                return None
+            return self._pooled_cache.set(horizon.value, artifact)
+
+    # Quality gate — gate on ACCURACY, not F1. Live verification (2026-05-30,
+    # Sprint 9.2b) showed F1 is gameable by class imbalance: the pooled LONG model
+    # scored F1=0.634 but accuracy=0.503 (chance) — a degenerate "always predict
+    # up" that F1 rewards because markets drift up. Accuracy vs ~0.5 base rate is
+    # the honest bar. The pooled model currently sits at chance (acc ~0.50-0.51 on
+    # both horizons) → it stays GATED OFF and the per-ticker model remains primary.
+    # If a future pooled model genuinely beats chance, this gate activates it
+    # automatically (and unlocks the ranking speed win). See docs/sprint-9.2-pooled-model.md.
+    MIN_POOLED_ACCURACY = 0.53
+
+    def _probabilistic_for(self, enriched_history, indicators, deterministic, horizon):
+        """Return (signal, validation). Uses the pooled model ONLY when its
+        artifact is cached AND its holdout accuracy ≥ MIN_POOLED_ACCURACY;
+        otherwise the per-ticker model. Never blocks on training, never raises."""
+        artifact = self._get_cached_pooled(horizon)
+        if artifact is not None and getattr(artifact.validation, "accuracy", 0.0) >= self.MIN_POOLED_ACCURACY:
+            try:
+                signal = predict_pooled(artifact, enriched_history, horizon)
+                return signal, artifact.validation
+            except Exception:
+                pass
+        out = generate_probabilistic_signal(enriched_history, indicators, deterministic, horizon)
+        return out.signal, out.validation
 
     def analyze_ticker(
         self,
@@ -63,7 +124,7 @@ class MarketBotService:
         enriched_history = compute_indicators(price_history.frame)
         indicators = build_indicator_snapshot(enriched_history)
         deterministic = generate_deterministic_signal(enriched_history, horizon)
-        probabilistic_output = generate_probabilistic_signal(
+        probabilistic_raw, probabilistic_validation = self._probabilistic_for(
             enriched_history, indicators, deterministic, horizon
         )
         backtest = run_long_only_backtest(price_history.frame, horizon) if include_backtest else None
@@ -73,7 +134,7 @@ class MarketBotService:
         else:
             catalysts, guardrails = [], []
 
-        probabilistic_signal = _apply_rumor_policy(probabilistic_output.signal, catalysts)
+        probabilistic_signal = _apply_rumor_policy(probabilistic_raw, catalysts)
         actions = suggest_actions(horizon, deterministic, probabilistic_signal)
 
         analysis = TickerAnalysis(
@@ -83,7 +144,7 @@ class MarketBotService:
             indicators=indicators,
             deterministic=deterministic,
             probabilistic=probabilistic_signal,
-            validation=probabilistic_output.validation,
+            validation=probabilistic_validation,
             backtest=backtest,
             actions=actions,
             catalysts=catalysts,

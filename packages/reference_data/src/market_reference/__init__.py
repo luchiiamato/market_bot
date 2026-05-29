@@ -4,6 +4,11 @@ from .benchmarks import (
     ExchangeRates,
     PeriodBenchmarkSnapshot,
 )
+from .cedear_ratios import (
+    clear_cedear_ratio_cache,
+    fetch_cedear_ratios,
+    live_cedear_ratio,
+)
 from .classification import (
     TICKER_CLASSIFICATION,
     aggregate_exposure,
@@ -28,6 +33,9 @@ __all__ = [
     "ArgentinaBenchmarkService",
     "ExchangeRates",
     "PeriodBenchmarkSnapshot",
+    "clear_cedear_ratio_cache",
+    "fetch_cedear_ratios",
+    "live_cedear_ratio",
     "TICKER_CLASSIFICATION",
     "aggregate_exposure",
     "classify_ticker",

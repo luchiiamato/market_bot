@@ -13,6 +13,28 @@ class AnalyzeRequest(BaseModel):
     horizon: str = Field(default="short", pattern="^(short|long)$")
 
 
+class AiAnalysisRequest(AnalyzeRequest):
+    pass
+
+
+class AiAnalysisCitationResponse(BaseModel):
+    title: str
+    url: str
+    source: Optional[str] = None
+    published_at: Optional[str] = None
+
+
+class AiAnalysisResponse(BaseModel):
+    ticker: str
+    horizon: str
+    provider: str
+    model: str
+    content: str
+    citations: list[AiAnalysisCitationResponse] = Field(default_factory=list)
+    generated_at: datetime
+    used_profile_context: bool = False
+
+
 class RegisterRequest(BaseModel):
     username: str = Field(min_length=3, max_length=32)
     password: str = Field(min_length=6, max_length=128)

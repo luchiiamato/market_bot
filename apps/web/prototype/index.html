@@ -8,7 +8,7 @@
     <title>Market Bot · Editorial Terminal</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="./styles.css?v=20260530-sprint8" />
+    <link rel="stylesheet" href="./styles.css?v=20260530-sprint13" />
     <script>
       // Pre-paint theme resolution to avoid FOUC.
       (function () {
@@ -235,17 +235,23 @@
             <div class="verdict-grid" id="verdict-grid"></div>
 
             <div class="analysis-grid">
-              <article class="analysis-card wide-card">
+              <article class="analysis-card wide-card" id="indicators-card">
                 <div class="card-head-inline">
                   <div>
-                    <p class="analysis-kicker">Market regime</p>
-                    <h3 id="market-overview-title">Cargando tape general</h3>
+                    <p class="analysis-kicker">Indicadores</p>
+                    <h3 id="indicators-title">Lectura técnica del ticker</h3>
                   </div>
-                  <span class="tone-chip" id="market-overview-chip">Sync</span>
+                  <div class="indicator-head-actions">
+                    <span class="tone-chip">Snapshot</span>
+                    <button type="button" class="ghost-button indicator-ai-button" id="indicator-ai-button" disabled>
+                      <span class="button-label">Analizar con AI</span>
+                      <span class="button-spinner" aria-hidden="true"></span>
+                    </button>
+                  </div>
                 </div>
-                <p class="panel-caption context-caption" id="market-overview-summary">Índices, volatilidad, cripto, tasas y petróleo para leer si el mercado acompaña o pelea tu tesis.</p>
-                <div class="macro-grid" id="market-overview-grid"></div>
-                <ul class="warning-list" id="market-overview-warnings"></ul>
+                <p class="panel-caption context-caption">Pasá el cursor (o tocá en mobile) sobre cada indicador para ver qué significa y cómo leer el valor actual.</p>
+                <div class="indicator-grid" id="indicator-grid"></div>
+                <div class="ai-analysis-shell" id="ai-analysis-shell" aria-live="polite"></div>
               </article>
 
               <article class="analysis-card">
@@ -326,6 +332,19 @@
                     <ul class="reason-list" id="guardrail-list"></ul>
                   </div>
                 </div>
+              </article>
+
+              <article class="analysis-card wide-card">
+                <div class="card-head-inline">
+                  <div>
+                    <p class="analysis-kicker">Market regime</p>
+                    <h3 id="market-overview-title">Cargando tape general</h3>
+                  </div>
+                  <span class="tone-chip" id="market-overview-chip">Sync</span>
+                </div>
+                <p class="panel-caption context-caption" id="market-overview-summary">Índices, volatilidad, cripto, tasas y petróleo para leer si el mercado acompaña o pelea tu tesis.</p>
+                <div class="macro-grid" id="market-overview-grid"></div>
+                <ul class="warning-list" id="market-overview-warnings"></ul>
               </article>
             </div>
           </section>
@@ -1154,12 +1173,12 @@
     <script src="./config.js"></script>
     <!-- Main app uses `defer` so it doesn't block first paint. Parsing
          still happens once HTML is ready; perceived FCP improves. -->
-    <script src="./app.js?v=20260530-sprint8-c" defer></script>
+    <script src="./app.js?v=20260530-sprint13" defer></script>
     <!-- Glossary (~50KB of data) is intentionally NOT preloaded here.
          app.js injects it on demand when the user opens Learning, or on
          pointerenter of the Learning tab as a prefetch warmup. -->
     <!-- Optional: preload to bias the browser cache without executing it.
          Comment out if you want strictly no-cost first paint. -->
-    <link rel="prefetch" href="./glossary.js?v=20260530-sprint8-c" as="script" />
+    <link rel="prefetch" href="./glossary.js?v=20260530-sprint13" as="script" />
   </body>
 </html>

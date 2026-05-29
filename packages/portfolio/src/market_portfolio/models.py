@@ -70,6 +70,9 @@ class PositionValuation:
     # answered. Both labels are surfaced in the UI side-by-side.
     preferred_benchmark_return_pct: float = 0.0
     preferred_benchmark_label: str = "inflation"
+    # Daily price change vs previous close. 0.0 when data is unavailable.
+    # Positive = up today, negative = down today.
+    change_pct_1d: float = 0.0
     benchmark_comparisons: list[BenchmarkComparison] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 

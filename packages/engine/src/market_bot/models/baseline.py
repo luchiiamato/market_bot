@@ -158,6 +158,14 @@ def _generate_validated_signal(
         signal_warnings.append("La calibracion aun es debil. Tomar la confianza como orientativa.")
     if f1 < 0.48:
         signal_warnings.append("El modelo supera apenas al azar. Usar el motor deterministico como referencia principal.")
+    # Sprint 9.2b honesty: F1 can look fine while accuracy sits at chance (class
+    # imbalance — markets drift up). Gate the user-facing claim on ACCURACY too,
+    # so the probability is presented as orientative, never as a hard signal.
+    if accuracy < 0.52:
+        signal_warnings.append(
+            "El modelo no le gana al azar en aciertos (accuracy ~50%). Tratá la probabilidad "
+            "como orientativa, no como señal: priorizá el motor determinístico, catalysts y tu criterio."
+        )
 
     validation = ModelValidationSummary(
         split_strategy="chronological_holdout_plus_timeseriessplit",

@@ -40,6 +40,68 @@ Reutiliza lo de 9.1: el target a horizonte (`target_horizon_bars`) y el
   `_warm_rankings_cache`).
 - `tests/test_pooled_model.py` — NUEVO, offline con frames sintéticos.
 
+## ESTADO 2026-05-30 (noche): INFRA COMPLETA + VERIFICADO EN VIVO. Pooled GATEADO OFF.
+
+**Resultado honesto de la verificación en vivo (la lección de 9.1 pagó):**
+- El pooled entrena OK (58 tickers, ~44s, en el warmup). PERO **f1 holdout ≈ 0.417**
+  — peor que azar y peor que el per-ticker (0.58-0.71). Shippearlo sería una
+  regresión de calidad (prob_up washed out ~0.5, conf en el piso).
+- **Decisión: QUALITY GATE.** `service.MIN_POOLED_F1 = 0.52`. `_probabilistic_for`
+  usa el pooled SOLO si `artifact.validation.f1 >= 0.52`; si no, cae al per-ticker.
+  Verificado en vivo: con el pooled en 0.417, `/analyze` NVDA cae a per-ticker
+  (`split=chronological_holdout...`, f1=0.579, conf=0.55). Correctness protegida.
+- **Consecuencia:** el speed win (65s→rápido) NO se materializa todavía, porque el
+  pooled está gateado off → ranking/analyze siguen usando per-ticker. El warmup
+  ya mitiga la lentitud para el tester (sin cambios para él).
+- **Infra lista para cuando el pooled mejore**: apenas un pooled cruce f1≥0.52, el
+  gate lo deja pasar automáticamente y el speed win arranca solo, sin más wiring.
+
+### → 9.2b (NUEVO): mejorar el pooled para que cruce el gate y entregue el speed
+Por qué el pooled simple falla y qué probar (en orden de probable impacto):
+1. **Normalización per-ticker de features** — pooled mezcla escalas/regímenes de 58
+   tickers. Normalizar cada feature por ticker (z-score rolling) antes de poolear.
+2. **Walk-forward CV en vez de un solo time-holdout** — el holdout único cae en una
+   ventana reciente que puede ser chop market-wide → f1 bajo. Validar con varios cortes.
+3. **Target/threshold**: probar magnitud (retorno > umbral) en vez de pura dirección;
+   o target cross-sectional (¿este ticker supera a la mediana del universo a H?).
+4. **Más/mejores features** — agregar contexto macro (régimen del SPY/VIX) como columnas.
+5. Re-medir f1 holdout; objetivo ≥0.55 para superar cómodo el gate y al per-ticker.
+
+## ESTADO 2026-05-30 (tarde): Pasos 1-7 HECHOS ✅ — verificación en vivo abajo
+
+- Paso 1-4 ✅ `models/pooled.py` (artifact, build_dataset, train con split temporal, predict).
+- Paso 5 ✅ `service.py`: `_pooled_cache` (TTL 6h) + lock, `ensure_pooled_artifact`,
+  `_get_cached_pooled`, `_probabilistic_for` (pooled-cuando-cacheado, fallback per-ticker).
+  `analyze_ticker` usa el helper. NUNCA bloquea en training; degrada en cualquier error.
+- Paso 6 ✅ `app.py` warmup: entrena el pooled por horizonte ANTES de los rankings
+  (log "pooled train done" con f1/n_tickers). Ahí mueren los 65s del ranking.
+- Paso 7 ✅ `tests/test_pooled_model.py` (4 tests offline, sintéticos): dataset/target,
+  train+split sin leakage, predict válido, horizonte por plazo. **96/96 tests verde.**
+
+**PENDIENTE — VERIFICACIÓN EN VIVO (la lección de 9.1, NO saltear):**
+> Diferida a propósito: hay agents (13.1 backend, 13.2/13.3 frontend) escribiendo
+> archivos que el server importa. Reiniciar con un archivo a medio escribir daría
+> un fallo espurio. Hacer DESPUÉS de que los agents terminen:
+> 1. `source .env` + restart uvicorn (asyncio/h11), esperar log "pooled train done".
+> 2. `POST /analyze` NVDA/MELI/AAPL → confirmar `split=pooled_cross_sectional_time_holdout`
+>    (NO fallback, NO per-ticker). Si dice fallback, el pooled tiró excepción → debuggear.
+> 3. `curl -w %{time_total}` a `/rankings?horizon=short` cold → debería bajar de ~65s
+>    a pocos segundos (el grueso pasa a ser el fetch yfinance batch, no el ML).
+> 4. `pytest` ≥96 verde.
+
+---
+
+## ESTADO PREVIO: Pasos 1-4 SCAFFOLDED (referencia)
+
+`packages/engine/src/market_bot/models/pooled.py` ya creado y exportado en
+`models/__init__.py`. Contiene `PooledArtifact`, `build_pooled_dataset`,
+`train_pooled_model` (split temporal por fecha), `predict_pooled` y
+`_pooled_dominant_features`. Reusa `_build_feature_frame`/`_scenarios`/`_confidence`/
+`target_horizon_bars` de baseline (sin refactor). Importa OK, 92/92 tests verde.
+**Falta**: Paso 5 (cachear en service + usar en `analyze_ticker` con fallback),
+Paso 6 (entrenar en el warmup), Paso 7 (tests offline `test_pooled_model.py`),
+y la VERIFICACIÓN EN VIVO (la lección de 9.1: `/analyze` real, no solo tests).
+
 ## Pasos granulares
 
 ### Paso 1 · `pooled.py` — estructura
