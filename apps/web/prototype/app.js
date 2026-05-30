@@ -1,7 +1,7 @@
 // Build stamp — bumped on every UI design pass. Visible at the bottom of the
 // page AND in the console so we can confirm a fresh build is loaded when the
 // user reports "I don't see changes" (usually a cache issue).
-const MARKET_BOT_UI_BUILD = "20260530-sprint15 · indicators+ai-analysis-gemini-only";
+const MARKET_BOT_UI_BUILD = "20260530-sprint19 · nombre-en-workspace";
 console.info(`%cMarket Bot UI build: ${MARKET_BOT_UI_BUILD}`, "color:#c6f25c;font-weight:600");
 document.addEventListener("DOMContentLoaded", function () {
   const mark = document.getElementById("build-mark");
@@ -21,6 +21,10 @@ const localApiBase =
   typeof window.MARKET_BOT_LOCAL_API_BASE === "string" && window.MARKET_BOT_LOCAL_API_BASE.trim()
     ? window.MARKET_BOT_LOCAL_API_BASE.trim().replace(/\/$/, "")
     : "http://127.0.0.1:8000";
+const runtimeMode =
+  typeof window.MARKET_BOT_RUNTIME_MODE === "string" && window.MARKET_BOT_RUNTIME_MODE.trim()
+    ? window.MARKET_BOT_RUNTIME_MODE.trim().toLowerCase()
+    : "local";
 
 const defaultApiBase =
   window.location.origin && window.location.origin !== "null"
@@ -32,11 +36,12 @@ const _injectedApiBase =
     ? window.MARKET_BOT_API_BASE.trim().replace(/\/$/, "")
     : "";
 
+const _queryApiBase = new URLSearchParams(window.location.search).get("apiBase");
+const _storedApiBase = window.localStorage.getItem("marketBotApiBase");
 const API_BASE =
-  new URLSearchParams(window.location.search).get("apiBase") ||
-  window.localStorage.getItem("marketBotApiBase") ||
-  _injectedApiBase ||
-  defaultApiBase;
+  runtimeMode === "local"
+    ? _queryApiBase || defaultApiBase
+    : _queryApiBase || _storedApiBase || _injectedApiBase || defaultApiBase;
 
 const AUTH_TOKEN_KEY = "marketBotAccessToken";
 const ANALYSIS_CACHE_TTL_MS = 60_000;
@@ -162,6 +167,7 @@ const elements = {
   tickerEarningsHistory: document.querySelector("#ticker-earnings-history"),
   portfolioEarningsFeed: document.querySelector("#portfolio-earnings-feed"),
   workspaceTitle: document.querySelector("#workspace-title"),
+  workspaceNameChip: document.querySelector("#workspace-name-chip"),
   marketChip: document.querySelector("#market-chip"),
   marketOverviewTitle: document.querySelector("#market-overview-title"),
   marketOverviewChip: document.querySelector("#market-overview-chip"),
@@ -2237,6 +2243,7 @@ function renderWorkspaceIdle() {
   state.hasAnalyzed = false;
   resetAiAnalysis();
   elements.workspaceTitle.textContent = `Ticker seleccionado: ${state.ticker}`;
+  setWorkspaceName(state.ticker);
   elements.marketChip.textContent = `${titleCaseHorizon(state.horizon)} · Radar listo`;
   elements.verdictGrid.innerHTML = `
     <article class="verdict-card">
@@ -2353,6 +2360,8 @@ async function handleAuthSubmit(event) {
     Promise.allSettled([loadRankings(), loadPortfolioSummary()]).catch(() => {
       // Individual loaders already publish their own UI errors.
     });
+    // Show onboarding only on fresh registration or first-ever login on this device.
+    if (state.authMode === "register") maybeShowOnboarding();
   } catch (error) {
     setAuthStatus(`No se pudo completar el acceso: ${error.message}`);
   } finally {
@@ -3495,7 +3504,7 @@ function renderRadarSkeleton() {
 
 async function loadRankings() {
   const mode = state.rankingMode === "opportunities" ? "opportunities" : "default";
-  const url = `/rankings?horizon=${state.horizon}&limit=6&cedear_only=true&mode=${mode}`;
+  const url = `/rankings?horizon=${state.horizon}&limit=12&cedear_only=true&mode=${mode}`;
   const cacheKey = rankingsCacheKey();
   const cachedRankings = readTimedCache(rankingsCache, cacheKey, RANKINGS_CACHE_TTL_MS);
   if (!cachedRankings) {
@@ -3605,39 +3614,95 @@ function renderRadar() {
     return;
   }
 
+  // Hint del modo activo (qué estoy viendo).
+  const hint = document.getElementById("radar-mode-hint");
+  if (hint) {
+    hint.textContent = state.rankingMode === "opportunities"
+      ? "Solo nombres con algo pasando hoy (earnings, noticia, volumen o volatilidad). Sin índices."
+      : "Todo el universo, ordenado por fuerza del setup.";
+  }
+
   elements.radarGrid.innerHTML = state.radarItems
     .map((item, index) => {
-      const label =
-        index === 0
-          ? "Top setup"
-          : item.direction === "long"
-            ? "Long bias"
-            : item.direction === "short"
-              ? "Short bias"
-              : "Watch";
+      const action = _rankActionEs(item.action);
+      const score = Math.max(0, Math.min(100, Number(item.rank_score) || 0));
+      const strength = score >= 72 ? "Fuerte" : score >= 55 ? "Moderado" : "Flojo";
+      const conv = Math.round((Number(item.conviction) || 0) * 100);
       const reasons = Array.isArray(item.why_for_you) ? item.why_for_you : [];
       const reasonsHtml = reasons.length
         ? `<div class="why-for-you">${reasons
             .map((reason) => `<span class="why-chip">${escapeText(reason)}</span>`)
             .join("")}</div>`
-        : "";
+        : `<div class="why-for-you"><span class="why-chip is-muted">Setup técnico sin catalyst destacado</span></div>`;
       return `
         <button
           class="radar-card ${item.ticker === state.ticker ? "is-selected" : ""}"
           data-ticker="${escapeText(item.ticker)}"
           type="button"
+          title="Tocá para ver el análisis completo de ${escapeText(item.ticker)}"
         >
           <div class="radar-card-top">
-            <span class="radar-chip">${label}</span>
+            <span class="radar-rank">#${index + 1}</span>
             <strong>${escapeText(item.ticker)}</strong>
+            <span class="radar-action tone-${action.tone}">${action.label}</span>
           </div>
-          <h3>${toHeadline(item.action)} / ${item.regime}</h3>
-          <p>Score ${item.rank_score.toFixed(2)} · Convicción ${(item.conviction * 100).toFixed(0)}% · CEDEAR ${item.is_cedear ? "sí" : "no"}</p>
+          ${stockName(item.ticker) ? `<p class="radar-name">${escapeText(stockName(item.ticker))}</p>` : ""}
+          <div class="radar-score">
+            <div class="radar-score-track"><div class="radar-score-fill tone-${action.tone}" style="width:${score.toFixed(0)}%"></div></div>
+            <span class="radar-score-label">Setup ${strength} · convicción ${conv}%</span>
+          </div>
           ${reasonsHtml}
         </button>
       `;
     })
     .join("");
+}
+
+// Nombre completo del activo (sin fetch; cubre el universo CEDEAR).
+const STOCK_NAMES = {
+  AAPL: "Apple", AMZN: "Amazon", GOOGL: "Alphabet (Google)", GOOG: "Alphabet (Google)",
+  META: "Meta Platforms", MSFT: "Microsoft", NVDA: "NVIDIA", TSLA: "Tesla",
+  QQQ: "Nasdaq 100 ETF", SPY: "S&P 500 ETF", DIA: "Dow Jones ETF", VOO: "Vanguard S&P 500",
+  VTI: "Vanguard Total Market", GGAL: "Grupo Galicia", MELI: "Mercado Libre",
+  PAM: "Pampa Energía", PBR: "Petrobras", VIST: "Vista Energy", YPF: "YPF",
+  AMD: "AMD", AVGO: "Broadcom", INTC: "Intel", TSM: "Taiwan Semiconductor", ARM: "Arm Holdings",
+  MU: "Micron", QCOM: "Qualcomm", SNOW: "Snowflake", PLTR: "Palantir", CRWD: "CrowdStrike",
+  DDOG: "Datadog", NET: "Cloudflare", MDB: "MongoDB", ZS: "Zscaler", OKTA: "Okta",
+  CRM: "Salesforce", ORCL: "Oracle", ADBE: "Adobe", COIN: "Coinbase", PYPL: "PayPal",
+  SHOP: "Shopify", SQ: "Block (Square)", ABNB: "Airbnb", UBER: "Uber", SPOT: "Spotify",
+  ABBV: "AbbVie", LLY: "Eli Lilly", UNH: "UnitedHealth", JPM: "JPMorgan", BAC: "Bank of America",
+  "BRK.B": "Berkshire Hathaway", KO: "Coca-Cola", MCD: "McDonald's", WMT: "Walmart",
+  DIS: "Disney", XOM: "ExxonMobil", VALE: "Vale", BABA: "Alibaba", BIDU: "Baidu",
+  JD: "JD.com", PDD: "PDD (Temu)", NU: "Nubank", IBB: "Biotech ETF", ABEV: "Ambev",
+  ALAB: "Astera Labs"
+};
+function stockName(ticker) {
+  return STOCK_NAMES[String(ticker || "").toUpperCase()] || "";
+}
+
+// Chip verde con el nombre completo, al lado del "Ticker seleccionado: AAPL".
+function setWorkspaceName(ticker) {
+  const chip = elements.workspaceNameChip;
+  if (!chip) return;
+  const name = stockName(ticker);
+  if (name) {
+    chip.textContent = name;
+    chip.hidden = false;
+  } else {
+    chip.textContent = "";
+    chip.hidden = true;
+  }
+}
+
+// Traduce la acción del motor a verbo claro en castellano + tono de color.
+function _rankActionEs(action) {
+  const a = String(action || "").toLowerCase();
+  if (a === "buy" || a === "go_long") return { label: "Comprar", tone: "bull" };
+  if (a === "hold") return { label: "Mantener", tone: "neutral" };
+  if (a === "avoid") return { label: "Evitar", tone: "bear" };
+  if (a === "go_short" || a === "long_put") return { label: "Bajista", tone: "bear" };
+  if (a === "covered_call" || a === "cash_secured_put") return { label: "Estrategia opción", tone: "neutral" };
+  return { label: toHeadline(action), tone: "neutral" };
 }
 
 function escapeText(value) {
@@ -3821,6 +3886,7 @@ async function analyzeTicker(nextTicker = state.ticker) {
 function renderAnalysis(analysis) {
   state.hasAnalyzed = true;
   elements.workspaceTitle.textContent = `Ticker seleccionado: ${analysis.ticker}`;
+  setWorkspaceName(analysis.ticker);
   elements.marketChip.textContent = `${titleCaseHorizon(analysis.horizon)} · ${state.universe.includes(analysis.ticker) ? "CEDEAR" : "No CEDEAR"}`;
   elements.tickerInput.value = analysis.ticker;
   renderAiAnalysisPanel();
@@ -4239,6 +4305,7 @@ function renderTickerEarningsError(message) {
 function renderErrorState(ticker, error) {
   resetAiAnalysis();
   elements.workspaceTitle.textContent = `Ticker seleccionado: ${ticker}`;
+  setWorkspaceName(ticker);
   elements.marketChip.textContent = `${titleCaseHorizon(state.horizon)} · Error`;
   elements.verdictGrid.innerHTML = `
     <article class="verdict-card">
@@ -4978,6 +5045,277 @@ window.addEventListener("popstate", () => {
   applyHashRoute();
 });
 
+// ─── Track Record (Sprint 10) ────────────────────────────────────────────────
+
+let _trackRecordLoaded = false;
+
+async function loadTrackRecord() {
+  const grid = document.getElementById("track-record-grid");
+  if (!grid) return;
+  grid.innerHTML = `<p class="panel-caption">Cargando backtest y track record…</p>`;
+
+  const [backtestResult, trackRecordResult] = await Promise.allSettled([
+    fetchJson("/backtest/ranking?horizon=short&lookback_days=90"),
+    state.accessToken ? fetchJson("/decisions/track-record", { auth: true }) : Promise.resolve(null),
+  ]);
+  _trackRecordLoaded = true;
+  renderTrackRecord(
+    backtestResult.status === "fulfilled" ? backtestResult.value : null,
+    trackRecordResult.status === "fulfilled" ? trackRecordResult.value : null,
+  );
+}
+
+function renderTrackRecord(backtest, trackRecord) {
+  const grid = document.getElementById("track-record-grid");
+  if (!grid) return;
+
+  // Solo mostrar el panel cuando hay un backtest válido. Si no, queda oculto
+  // (evita una caja vacía/confusa en el landing). Reaparece al tener data.
+  const panel = document.getElementById("track-record-panel");
+  const hasData = backtest && !backtest.error;
+  if (panel) panel.classList.toggle("is-hidden", !hasData);
+  if (!hasData) return;
+
+  const fmtPct = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`);
+  const fmtRate = (v) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
+  const tone = (v) => (v == null ? "neutral" : v > 0 ? "bull" : "bear");
+
+  // ── Backtest ──
+  let backtestHtml = "";
+  if (!backtest || backtest.error) {
+    backtestHtml = `<p class="panel-caption bear">Backtest no disponible${backtest?.error ? ": " + escapeText(backtest.error) : ""}.</p>`;
+  } else {
+    const hitSpy = backtest.hit_rate_vs_spy;
+    const edgeVerdict =
+      hitSpy != null && hitSpy > 0.55
+        ? `<span class="bull">✓ Algo de edge vs SPY (${(hitSpy * 100).toFixed(0)}% de los períodos)</span>`
+        : hitSpy != null
+        ? `<span class="bear">Sin edge claro vs SPY (${(hitSpy * 100).toFixed(0)}% — cerca del azar)</span>`
+        : "—";
+
+    backtestHtml = `
+      <article class="analysis-card">
+        <p class="analysis-kicker">Backtest ranking · últimos ${backtest.lookback_days}d · top-${backtest.top_n}</p>
+        <h3>Señal determinística vs benchmarks</h3>
+        <div class="track-record-metrics">
+          <div class="metric-tile"><span class="metric-label">Estrategia (acum.)</span><span class="metric-value ${tone(backtest.strategy_cum_return)}">${fmtPct(backtest.strategy_cum_return)}</span></div>
+          <div class="metric-tile"><span class="metric-label">SPY (acum.)</span><span class="metric-value ${tone(backtest.spy_cum_return)}">${fmtPct(backtest.spy_cum_return)}</span></div>
+          <div class="metric-tile"><span class="metric-label">Plazo fijo (acum.)</span><span class="metric-value neutral">${fmtPct(backtest.pf_cum_return)}</span></div>
+          <div class="metric-tile"><span class="metric-label">Hit rate vs SPY</span><span class="metric-value">${fmtRate(hitSpy)}</span></div>
+          <div class="metric-tile"><span class="metric-label">Períodos positivos</span><span class="metric-value">${fmtRate(backtest.hit_rate_positive)}</span></div>
+          <div class="metric-tile"><span class="metric-label">Sharpe (anualiz.)</span><span class="metric-value">${backtest.sharpe ?? "—"}</span></div>
+        </div>
+        <p class="panel-caption" style="margin-top:12px">Veredicto: ${edgeVerdict}</p>
+        <p class="panel-caption" style="margin-top:6px;opacity:.65">
+          Señal: RSI(14) + momentum 20d · Rebalanceo cada ${backtest.step_days ?? 5} días ·
+          ${backtest.n_periods} períodos · ${backtest.computed_at ? "Computado " + backtest.computed_at.slice(0, 10) : ""}
+        </p>
+      </article>`;
+
+    if (backtest.periods && backtest.periods.length) {
+      const recent = backtest.periods.slice(-8).reverse();
+      const rows = recent
+        .map(
+          (p) => `<tr>
+          <td>${escapeText(p.anchor_date)}</td>
+          <td class="diagnostics-num">${escapeText(p.top_tickers.join(", "))}</td>
+          <td class="diagnostics-num ${tone(p.strategy_return)}">${fmtPct(p.strategy_return)}</td>
+          <td class="diagnostics-num ${tone(p.spy_return)}">${fmtPct(p.spy_return)}</td>
+          <td class="diagnostics-num">${p.beat_spy ? "✓" : "✗"}</td>
+        </tr>`,
+        )
+        .join("");
+      backtestHtml += `
+        <article class="analysis-card wide-card" style="margin-top:16px">
+          <p class="analysis-kicker">Últimos períodos</p>
+          <div class="diagnostics-table-wrap">
+            <table class="diagnostics-table">
+              <thead><tr><th>Fecha</th><th>Top tickers</th><th>Estrategia</th><th>SPY</th><th>Ganó</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </article>`;
+    }
+  }
+
+  // ── Personal track record ──
+  let personalHtml = "";
+  if (!state.accessToken) {
+    personalHtml = `<p class="panel-caption" style="opacity:.7">Iniciá sesión para ver tu track record personal.</p>`;
+  } else if (!trackRecord || trackRecord.n_realized === 0) {
+    personalHtml = `<p class="panel-caption">Sin decisiones realizadas todavía. Guardá decisiones al analizar un ticker; el retorno se computa automáticamente en ${trackRecord?.n_pending ?? 0} período(s).</p>`;
+  } else {
+    const tr = trackRecord;
+    personalHtml = `
+      <article class="analysis-card">
+        <p class="analysis-kicker">Tus decisiones · track record personal</p>
+        <h3>${tr.n_realized} decisión(es) realizada(s)</h3>
+        <div class="track-record-metrics">
+          <div class="metric-tile"><span class="metric-label">Hit rate</span><span class="metric-value ${tr.hit_rate > 0.5 ? "bull" : "bear"}">${fmtRate(tr.hit_rate)}</span></div>
+          <div class="metric-tile"><span class="metric-label">Retorno promedio</span><span class="metric-value ${tone(tr.avg_return)}">${fmtPct(tr.avg_return)}</span></div>
+          <div class="metric-tile"><span class="metric-label">Sharpe</span><span class="metric-value">${tr.sharpe ?? "—"}</span></div>
+          <div class="metric-tile"><span class="metric-label">Mejor ticker</span><span class="metric-value bull">${escapeText(tr.best_ticker ?? "—")}</span></div>
+          <div class="metric-tile"><span class="metric-label">Peor ticker</span><span class="metric-value bear">${escapeText(tr.worst_ticker ?? "—")}</span></div>
+          <div class="metric-tile"><span class="metric-label">Pendientes</span><span class="metric-value">${tr.n_pending}</span></div>
+        </div>
+      </article>`;
+  }
+
+  grid.innerHTML = `
+    <div class="track-record-section">${backtestHtml}</div>
+    <div class="track-record-section">${personalHtml}</div>
+  `;
+}
+
+// ─── Onboarding (Sprint 11.2) ─────────────────────────────────────────────────
+
+const ONBOARDING_STEPS = [
+  {
+    title: "1. Completá tu perfil",
+    body: "Decinos tu tolerancia al riesgo y benchmark preferido. El motor personaliza el ranking y el chat para vos.",
+    cta: "Ir al perfil",
+    action: () => { setSurface("portfolio"); setPortfolioView("summary"); },
+  },
+  {
+    title: "2. Importá tu portfolio",
+    body: "Subí el extracto Balanz (.xlsx) o cargá posiciones manualmente. Una vez cargado, todo el análisis usa tus datos reales.",
+    cta: "Ir al portfolio",
+    action: () => { setSurface("portfolio"); setPortfolioView("load"); },
+  },
+  {
+    title: "3. Preguntale al asistente",
+    body: "El chat conoce tu portfolio y tu perfil. Preguntale \"¿cómo viene NVDA?\" o \"¿cuál es mi exposición a tech?\".",
+    cta: "Abrir chat",
+    action: () => setSurface("chat"),
+  },
+];
+
+let _onboardingStep = 0;
+
+function showOnboarding() {
+  let overlay = document.getElementById("onboarding-overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "onboarding-overlay";
+    overlay.className = "onboarding-overlay";
+    overlay.innerHTML = `
+      <div class="onboarding-card">
+        <div class="onboarding-steps" id="ob-dots"></div>
+        <div class="onboarding-body">
+          <h2 id="ob-title"></h2>
+          <p id="ob-body"></p>
+        </div>
+        <div class="onboarding-actions">
+          <button type="button" class="ghost-button" id="ob-skip">Saltar tour</button>
+          <button type="button" class="cta-button" id="ob-cta"></button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    document.getElementById("ob-skip").addEventListener("click", dismissOnboarding);
+    document.getElementById("ob-cta").addEventListener("click", () => {
+      const step = ONBOARDING_STEPS[_onboardingStep];
+      step.action();
+      if (_onboardingStep < ONBOARDING_STEPS.length - 1) {
+        _onboardingStep++;
+        renderOnboardingStep();
+      } else {
+        dismissOnboarding();
+      }
+    });
+  }
+  _onboardingStep = 0;
+  overlay.classList.remove("is-hidden");
+  renderOnboardingStep();
+}
+
+function renderOnboardingStep() {
+  const step = ONBOARDING_STEPS[_onboardingStep];
+  const titleEl = document.getElementById("ob-title");
+  const bodyEl = document.getElementById("ob-body");
+  const ctaEl = document.getElementById("ob-cta");
+  const dotsEl = document.getElementById("ob-dots");
+  if (!titleEl || !bodyEl || !ctaEl || !dotsEl) return;
+  titleEl.textContent = step.title;
+  bodyEl.textContent = step.body;
+  ctaEl.textContent = _onboardingStep < ONBOARDING_STEPS.length - 1 ? step.cta + " →" : step.cta + " ✓";
+  dotsEl.innerHTML = ONBOARDING_STEPS.map((_, i) =>
+    `<span class="onboarding-step-dot ${i < _onboardingStep ? "is-done" : i === _onboardingStep ? "is-active" : ""}"></span>`
+  ).join("");
+}
+
+function dismissOnboarding() {
+  const overlay = document.getElementById("onboarding-overlay");
+  if (overlay) overlay.classList.add("is-hidden");
+  try { localStorage.setItem("marketBotOnboardingDone", "1"); } catch (_) {}
+}
+
+function maybeShowOnboarding() {
+  try { if (localStorage.getItem("marketBotOnboardingDone")) return; } catch (_) {}
+  // Only show after successful login with empty portfolio (or first ever login)
+  setTimeout(showOnboarding, 800);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+document.addEventListener("DOMContentLoaded", () => {
+  const refreshBtn = document.getElementById("track-record-refresh");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", () => {
+      _trackRecordLoaded = false;
+      loadTrackRecord();
+    });
+  }
+
+  // ── Feedback (Sprint 11.1) ──────────────────────────────────────────────
+  const fab = document.getElementById("feedback-fab");
+  const dialog = document.getElementById("feedback-dialog");
+  const closeBtn = document.getElementById("feedback-close");
+  const form = document.getElementById("feedback-form");
+  const msgInput = document.getElementById("feedback-message");
+  const submitBtn = document.getElementById("feedback-submit");
+  const statusEl = document.getElementById("feedback-status");
+
+  if (fab && dialog) {
+    fab.addEventListener("click", () => {
+      if (statusEl) statusEl.textContent = "";
+      if (msgInput) msgInput.value = "";
+      dialog.showModal();
+      setTimeout(() => msgInput?.focus(), 50);
+    });
+    if (closeBtn) closeBtn.addEventListener("click", () => dialog.close());
+    dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
+  }
+
+  if (form && submitBtn && msgInput) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = msgInput.value.trim();
+      if (!msg) return;
+      submitBtn.disabled = true;
+      if (statusEl) statusEl.textContent = "Enviando…";
+      try {
+        const surface = document.querySelector(".surface-slider")?.dataset?.activeSurface || "";
+        await fetchJson("/feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: msg, page: surface }),
+          auth: Boolean(state.accessToken),
+        });
+        if (statusEl) statusEl.textContent = "✓ Gracias por el feedback.";
+        msgInput.value = "";
+        setTimeout(() => dialog?.close(), 1200);
+      } catch (err) {
+        if (statusEl) statusEl.textContent = `Error: ${err.message}`;
+        submitBtn.disabled = false;
+      }
+    });
+  }
+  // ───────────────────────────────────────────────────────────────────────
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function bootstrap() {
   const initialRoute = parseHashRoute(window.location.hash);
   setAuthMode(initialRoute.authMode || "login", { syncRoute: false });
@@ -5000,6 +5338,8 @@ async function bootstrap() {
     applyHashRoute({ replace: true });
     renderWorkspaceIdle();
     setStatus("Elegí un ticker o tocá una card del radar para correr el análisis.");
+    // Load track record lazily after main bootstrap — slow (~5-15s) and non-critical.
+    if (!_trackRecordLoaded) loadTrackRecord().catch(() => {});
   } catch (error) {
     renderRadar();
     renderErrorState(state.ticker, error);

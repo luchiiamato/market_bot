@@ -538,29 +538,25 @@ def _build_ai_analysis_context(
 
 def _build_ai_prompts(context: dict[str, Any]) -> tuple[str, str]:
     system_prompt = (
-        "Sos un analista financiero enfocado en acciones y CEDEARs para un inversor argentino. "
-        "Usá el contexto estructurado provisto como fuente principal y complementalo con búsqueda web "
-        "solo para información externa reciente y relevante. Distinguí con claridad hechos confirmados, "
-        "señales del mercado, inferencias y rumores. Nunca inventes contratos, earnings o eventos. "
-        "Respondé en español, en markdown claro, con tono ejecutivo. El modelo subyacente es Gemini 2.5 Pro."
+        "Sos un analista financiero senior enfocado en acciones y CEDEARs para un inversor argentino. "
+        "Usá el contexto estructurado provisto como fuente principal; complementá con info externa reciente "
+        "solo si es relevante. Distinguí con claridad hechos confirmados, señales de mercado, inferencias y "
+        "rumores; nunca inventes contratos, earnings ni eventos.\n"
+        "ESTILO OBLIGATORIO: preciso y conciso. Bullets cortos, sin relleno ni introducciones. "
+        "Máximo 3 bullets por sección. Cada bullet ≤ 25 palabras. Citá números concretos del contexto "
+        "(precio, RSI, score, probabilidad) cuando sostengan un punto. Español, markdown, tono ejecutivo."
     )
     user_prompt = (
-        "Analizá este setup y enriquecelo con contexto externo reciente.\n\n"
-        "Objetivo:\n"
-        "- sintetizar el setup técnico y probabilístico\n"
-        "- detectar noticias, contratos, regulación, cambios de fundamentales, earnings, eventos macro o sectoriales\n"
-        "- marcar si el caso cambia entre corto y largo plazo según el horizonte pedido\n"
-        "- explicar qué confirma la tesis y qué la invalida\n"
-        "- si hay rumores, etiquetarlos como rumores y no tratarlos como hechos\n\n"
-        "Formato de salida:\n"
+        "Analizá este setup. Sé conciso y concreto — el lector es un inversor que decide rápido.\n\n"
+        "Devolvé EXACTAMENTE estas secciones (sin texto fuera de ellas), cada una con ≤3 bullets cortos:\n"
         "## Lectura del setup\n"
         "## Qué cambió afuera del gráfico\n"
         "## Earnings y riesgos de evento\n"
-        "## Tesis operativa para este horizonte\n"
-        "## Qué invalidaría la idea\n"
-        "## Veredicto AI\n\n"
-        "En el veredicto final cerrá con una postura concreta (alcista, neutral o bajista) "
-        "y con 3 bullets de mayor peso.\n\n"
+        "## Tesis para este horizonte\n"
+        "## Qué la invalidaría\n"
+        "## Veredicto\n"
+        "El veredicto: una palabra de postura (Alcista / Neutral / Bajista) + 3 bullets de mayor peso. "
+        "Si algo es rumor, etiquetalo como rumor. No repitas el contexto crudo; interpretalo.\n\n"
         f"Contexto estructurado:\n```json\n{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}\n```"
     )
     return system_prompt, user_prompt
@@ -1135,6 +1131,84 @@ def validation_report(
     )
 
 
+_backtest_cache: TTLCache[dict] = TTLCache(ttl_seconds=3600)  # 1h cache
+
+
+@app.get("/backtest/ranking")
+def backtest_ranking_endpoint(
+    horizon: str = Query(default="short", pattern="^(short|long)$"),
+    lookback_days: int = Query(default=90, ge=30, le=365),
+    top_n: int = Query(default=3, ge=1, le=10),
+) -> dict:
+    """Walk-forward ranking backtest: did top-N signals beat SPY and plazo fijo?
+
+    Uses RSI(14) + 20-day momentum as the ranking signal (deterministic).
+    Rebalances weekly. First call for a given (horizon, lookback_days) takes
+    ~5-15s; result is cached for 1 hour afterwards.
+
+    Public endpoint — transparency is the goal.
+    """
+    from market_bot.config import SUGGESTION_UNIVERSE
+    from market_bot.backtesting.ranking import backtest_ranking
+
+    cache_key = f"backtest:{horizon}:{lookback_days}:{top_n}"
+    cached = _backtest_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # Get current plazo fijo rate for benchmark comparison.
+    # ArgentinaBenchmarkService exposes plazo_fijo_annual_rate on the snapshot;
+    # fall back to ~50% annual (conservative estimate) if unavailable.
+    pf_annual = 0.50
+    try:
+        snap = benchmark_service.build_period_snapshot(
+            __import__("datetime").date.today() - __import__("datetime").timedelta(days=365),
+            __import__("datetime").date.today(),
+        )
+        pf_annual = getattr(snap.current_exchange, "plazo_fijo_annual_rate", None) or 0.50
+    except Exception:
+        pass
+
+    result = backtest_ranking(
+        SUGGESTION_UNIVERSE,
+        horizon=horizon,
+        lookback_days=lookback_days,
+        top_n=top_n,
+        pf_annual_rate=pf_annual,
+    )
+
+    payload: dict = {
+        "horizon": result.horizon,
+        "lookback_days": result.lookback_days,
+        "top_n": result.top_n,
+        "n_periods": result.n_periods,
+        "hit_rate_vs_spy": result.hit_rate_vs_spy,
+        "hit_rate_positive": result.hit_rate_positive,
+        "strategy_cum_return": result.strategy_cum_return,
+        "spy_cum_return": result.spy_cum_return,
+        "pf_cum_return": result.pf_cum_return,
+        "avg_period_return": result.avg_period_return,
+        "sharpe": result.sharpe,
+        "max_drawdown": result.max_drawdown,
+        "computed_at": result.computed_at,
+        "error": result.error,
+        "periods": [
+            {
+                "anchor_date": p.anchor_date,
+                "top_tickers": p.top_tickers,
+                "strategy_return": p.strategy_return,
+                "spy_return": p.spy_return,
+                "pf_return": p.pf_return,
+                "beat_spy": p.beat_spy,
+            }
+            for p in result.periods
+        ],
+    }
+    if result.error is None:
+        _backtest_cache.set(cache_key, payload)
+    return payload
+
+
 @app.post("/decisions", response_model=DecisionResponse, status_code=status.HTTP_201_CREATED)
 def create_decision(
     request: DecisionRequest,
@@ -1243,6 +1317,61 @@ def trigger_realize_decisions(
     warmup also runs this automatically.
     """
     return realize_decisions_job()
+
+
+# ─── Feedback (Sprint 11.1) ───────────────────────────────────────────────────
+
+def _ensure_feedback_schema() -> None:
+    from market_identity.store import connection as _conn
+    with _conn() as conn:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                message TEXT NOT NULL,
+                page TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_feedback_created_at ON feedback(created_at);
+        """)
+
+
+@app.post("/feedback", status_code=status.HTTP_201_CREATED)
+def submit_feedback(
+    request: Request,
+    body: dict,
+) -> dict:
+    """Accept in-app feedback from the tester. Auth optional — anonymous OK.
+
+    Body: ``{"message": "...", "page": "workspace"}``
+    ``message`` is required and capped at 2000 chars.
+    """
+    message = str(body.get("message", "")).strip()[:2000]
+    if not message:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="message is required")
+    page = str(body.get("page", "")).strip()[:100] or None
+
+    # Resolve optional user from session token in header.
+    user_id: int | None = None
+    try:
+        auth_header = request.headers.get("Authorization", "")
+        token = auth_header.removeprefix("Bearer ").strip()
+        if token:
+            user = identity_service.validate_session(token)
+            user_id = user.user_id
+    except Exception:
+        pass
+
+    _ensure_feedback_schema()
+    from market_identity.store import connection as _conn
+    created_at = __import__("datetime").datetime.utcnow().isoformat()
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO feedback (user_id, message, page, created_at) VALUES (?, ?, ?, ?)",
+            (user_id, message, page, created_at),
+        )
+    api_logger.info("feedback received", extra={"user_id": user_id, "page": page, "len": len(message)})
+    return {"status": "ok", "created_at": created_at}
 
 
 @app.get("/news/{ticker}", response_model=list[NewsItemResponse])
@@ -1765,6 +1894,146 @@ ensure_chat_schema()
 
 CHAT_MESSAGE_RATE_LIMIT = rate_limit(key="chat_message", max_hits=20, window_seconds=60 * 60)
 
+# ─── Chat tools (Sprint 11.3) ─────────────────────────────────────────────────
+
+_CHAT_TOOLS: list[dict] = [
+    {
+        "name": "analyze_ticker",
+        "description": (
+            "Analyze a stock ticker with the Market Bot engine. Returns technical signals, "
+            "probabilistic scenarios, deterministic setup, and actionable recommendations. "
+            "Use this when the user asks about a specific stock, e.g. '¿cómo viene NVDA?' "
+            "or 'analizá AAPL para mí'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {
+                    "type": "string",
+                    "description": "Stock ticker symbol, e.g. AAPL, NVDA, MELI",
+                },
+                "horizon": {
+                    "type": "string",
+                    "enum": ["short", "long"],
+                    "description": "Analysis horizon. 'short' = days/weeks, 'long' = months.",
+                },
+            },
+            "required": ["ticker"],
+        },
+    },
+    {
+        "name": "get_portfolio_summary",
+        "description": (
+            "Fetch a fresh snapshot of the user's current portfolio: total ARS/USD value, "
+            "P&L, real return vs inflation/benchmark, and top positions. "
+            "Use this when the user asks about their portfolio performance or holdings."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_ranking",
+        "description": (
+            "Get the current ranking of CEDEARs from the engine, with scores and reasons. "
+            "Use this when the user asks 'qué acciones convienen ahora' or similar."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["default", "opportunities"],
+                    "description": "'opportunities' filters to high-catalyst names only.",
+                },
+                "horizon": {
+                    "type": "string",
+                    "enum": ["short", "long"],
+                },
+            },
+        },
+    },
+]
+
+
+def _make_tool_executor(current_user: AuthenticatedUser):
+    """Return a callable that executes a named tool and returns a JSON string."""
+
+    def execute(name: str, args: dict) -> str:
+        import json as _json
+
+        if name == "analyze_ticker":
+            ticker = str(args.get("ticker", "")).upper()
+            horizon_str = str(args.get("horizon", "short")).lower()
+            try:
+                analysis = service.analyze_ticker(ticker, Horizon(horizon_str))
+                snapshot = TickerAnalysisResponse.model_validate(analysis, from_attributes=True)
+                primary = snapshot.actions[0] if snapshot.actions else None
+                return _json.dumps({
+                    "ticker": ticker,
+                    "horizon": horizon_str,
+                    "setup": snapshot.deterministic.setup_name if snapshot.deterministic else None,
+                    "direction": snapshot.deterministic.direction if snapshot.deterministic else None,
+                    "score": snapshot.deterministic.score if snapshot.deterministic else None,
+                    "probability_up": snapshot.probabilistic.probability_up if snapshot.probabilistic else None,
+                    "primary_action": primary.model_dump() if primary else None,
+                    "catalysts": [c.model_dump() for c in (snapshot.catalysts or [])],
+                    "warnings": snapshot.probabilistic.warnings if snapshot.probabilistic else [],
+                }, default=str)
+            except Exception as exc:
+                return _json.dumps({"error": str(exc), "ticker": ticker})
+
+        if name == "get_portfolio_summary":
+            try:
+                profile = identity_service.get_profile(current_user.user_id)
+                benchmark = getattr(profile, "benchmark_preference", "ccl") or "ccl"
+                risk = getattr(profile, "risk_tolerance", "medium") or "medium"
+                summary = portfolio_service.portfolio_summary(
+                    current_user.user_id,
+                    benchmark_preference=benchmark,
+                    risk_tolerance=risk,
+                )
+                top = sorted(summary.positions, key=lambda p: p.current_value_ars, reverse=True)[:5]
+                return _json.dumps({
+                    "total_value_ars": round(summary.total_value_ars, 2),
+                    "total_value_usd": round(summary.total_value_usd, 2),
+                    "total_return_pct_ars": round(summary.total_return_pct_ars, 4),
+                    "real_return_pct": round(summary.total_real_return_pct, 4),
+                    "preferred_benchmark_return_pct": round(summary.total_preferred_benchmark_return_pct, 4),
+                    "preferred_benchmark_label": summary.preferred_benchmark_label,
+                    "positions_count": summary.positions_count,
+                    "top_positions": [
+                        {
+                            "symbol": p.symbol,
+                            "value_ars": round(p.current_value_ars, 2),
+                            "return_pct": round(p.return_pct_ars, 4),
+                            "change_pct_1d": round(p.change_pct_1d, 4),
+                        }
+                        for p in top
+                    ],
+                }, default=str)
+            except Exception as exc:
+                return _json.dumps({"error": str(exc)})
+
+        if name == "get_ranking":
+            try:
+                mode = str(args.get("mode", "default"))
+                horizon_str = str(args.get("horizon", "short"))
+                items = service.rank_universe(Horizon(horizon_str), limit=6, cedear_only=True, mode=mode)
+                return _json.dumps([
+                    {
+                        "ticker": i.ticker,
+                        "score": round(i.score, 1),
+                        "direction": i.direction,
+                        "why_for_you": i.why_for_you[:2] if i.why_for_you else [],
+                    }
+                    for i in items
+                ], default=str)
+            except Exception as exc:
+                return _json.dumps({"error": str(exc)})
+
+        return _json.dumps({"error": f"tool '{name}' not implemented"})
+
+    return execute
+
 
 @app.get("/chat/providers", response_model=list[ChatProviderInfo])
 def chat_providers() -> list[ChatProviderInfo]:
@@ -1899,11 +2168,17 @@ def post_chat_message(
     ]
     system_prompt = _build_chat_system_prompt(current_user, request.content)
 
+    # Build tool executor if the provider is Anthropic (most reliable tool-use).
+    chat_tools = _CHAT_TOOLS if provider.name == "anthropic" else None
+    tool_exec = _make_tool_executor(current_user) if chat_tools else None
+
     try:
         response = provider.chat(
             messages=history,
             system=system_prompt,
             model=chosen_model,
+            tools=chat_tools,
+            tool_executor=tool_exec,
         )
     except Exception as exc:  # noqa: BLE001 — surface SDK / network errors as 502
         raise HTTPException(

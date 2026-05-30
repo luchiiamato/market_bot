@@ -50,6 +50,8 @@ class OpenAIChatProvider(ChatProvider):
         messages: list[ChatMessage],
         system: str | None = None,
         model: str | None = None,
+        tools=None,
+        tool_executor=None,
     ) -> ProviderResponse:
         import openai  # type: ignore
 

@@ -8,7 +8,7 @@
     <title>Market Bot · Editorial Terminal</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="./styles.css?v=20260530-sprint13" />
+    <link rel="stylesheet" href="./styles.css?v=20260530-sprint19" />
     <script>
       // Pre-paint theme resolution to avoid FOUC.
       (function () {
@@ -205,19 +205,24 @@
           <section class="panel radar-panel">
             <div class="panel-header">
               <div>
-                <p class="panel-kicker">Landing / Top acciones</p>
-                <h2>Oportunidades para ir a buscar</h2>
+                <p class="panel-kicker">Ranking de acciones</p>
+                <h2>Qué mirar hoy, ordenado por fuerza del setup</h2>
+                <p class="panel-caption radar-explainer">
+                  El motor analiza el universo de CEDEARs y los ordena por la fuerza
+                  técnica del momento + catalysts (earnings, noticias). #1 = el setup
+                  más fuerte hoy. Tocá una card para abrir el análisis completo.
+                </p>
               </div>
               <div class="radar-controls">
                 <div class="ranking-mode-switch" role="radiogroup" aria-label="Modo de ranking">
-                  <button type="button" class="ranking-mode-pill is-selected" data-ranking-mode="default" aria-pressed="true">
-                    Ranking completo
+                  <button type="button" class="ranking-mode-pill is-selected" data-ranking-mode="default" aria-pressed="true" title="Todo el universo, ordenado por fuerza del setup">
+                    Todas
                   </button>
-                  <button type="button" class="ranking-mode-pill" data-ranking-mode="opportunities" aria-pressed="false">
-                    Solo oportunidades
+                  <button type="button" class="ranking-mode-pill" data-ranking-mode="opportunities" aria-pressed="false" title="Solo nombres con algo pasando hoy: earnings, noticia, volumen o volatilidad alta. Sin índices (SPY/QQQ).">
+                    Con movimiento
                   </button>
                 </div>
-                <p class="panel-caption">Clic para cargar un ejemplo en el analizador.</p>
+                <p class="panel-caption radar-mode-hint" id="radar-mode-hint">Todo el universo, ordenado por fuerza del setup.</p>
               </div>
             </div>
             <div class="radar-grid" id="radar-grid"></div>
@@ -227,7 +232,10 @@
             <div class="panel-header">
               <div>
                 <p class="panel-kicker">Workspace</p>
-                <h2 id="workspace-title">Ticker seleccionado: AAPL</h2>
+                <div class="workspace-title-row">
+                  <h2 id="workspace-title">Ticker seleccionado: AAPL</h2>
+                  <span class="market-chip" id="workspace-name-chip" hidden></span>
+                </div>
               </div>
               <div class="market-chip" id="market-chip">Short horizon</div>
             </div>
@@ -349,6 +357,21 @@
             </div>
           </section>
         </div>
+
+          <section class="panel track-record-panel is-hidden" id="track-record-panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Track record</p>
+                <h2>¿El ranking le gana al mercado?</h2>
+              </div>
+              <button type="button" class="ghost-button" id="track-record-refresh">Actualizar</button>
+            </div>
+            <p class="panel-caption" style="margin-bottom:20px">
+              Backtest walk-forward del ranking (RSI + momentum, rebalanceo semanal) vs SPY y plazo fijo.
+              Tus decisiones guardadas con retorno realizado. Honesto sobre los límites del motor.
+            </p>
+            <div id="track-record-grid" class="track-record-grid"></div>
+          </section>
 
         <div class="surface-stack" id="surface-portfolio" data-surface-id="portfolio">
           <section class="panel portfolio-panel">
@@ -1170,15 +1193,33 @@
     <!-- Deploy-time config: Vercel regenerates config.js with MARKET_BOT_API_BASE
          before each deploy. Loaded BEFORE app.js so the constant is available
          when the API_BASE resolution runs. Cached with `no-store` per vercel.json. -->
+    <!-- Feedback button (Sprint 11.1) -->
+    <button type="button" id="feedback-fab" class="feedback-fab" aria-label="Reportar algo">
+      <span aria-hidden="true">💬</span>
+    </button>
+    <dialog id="feedback-dialog" class="feedback-dialog">
+      <form id="feedback-form" method="dialog">
+        <div class="feedback-header">
+          <h3>Reportar / Sugerencia</h3>
+          <button type="button" id="feedback-close" class="ghost-button" aria-label="Cerrar">✕</button>
+        </div>
+        <textarea id="feedback-message" class="feedback-textarea" placeholder="¿Qué encontraste? ¿Qué mejorarías? Todo feedback suma." rows="4" maxlength="2000"></textarea>
+        <div class="feedback-footer">
+          <span id="feedback-status" class="panel-caption"></span>
+          <button type="submit" class="cta-button" id="feedback-submit">Enviar</button>
+        </div>
+      </form>
+    </dialog>
+
     <script src="./config.js"></script>
     <!-- Main app uses `defer` so it doesn't block first paint. Parsing
          still happens once HTML is ready; perceived FCP improves. -->
-    <script src="./app.js?v=20260530-sprint13" defer></script>
+    <script src="./app.js?v=20260530-sprint19" defer></script>
     <!-- Glossary (~50KB of data) is intentionally NOT preloaded here.
          app.js injects it on demand when the user opens Learning, or on
          pointerenter of the Learning tab as a prefetch warmup. -->
     <!-- Optional: preload to bias the browser cache without executing it.
          Comment out if you want strictly no-cost first paint. -->
-    <link rel="prefetch" href="./glossary.js?v=20260530-sprint13" as="script" />
+    <link rel="prefetch" href="./glossary.js?v=20260530-sprint19" as="script" />
   </body>
 </html>

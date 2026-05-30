@@ -1383,30 +1383,45 @@ determinismo), nuevos tests del target/horizonte.
   > Warmup loop corre `realize_decisions_job()` cada 8 min automáticamente.
   > 103/103 tests verde.
 
-- **10.2 · Backtest del ranking (era 6.9)** `[ ]` — PRÓXIMO A IMPLEMENTAR
-  > "si seguías el top-3 del ranking cada día, ¿qué pasaba?" vs SPY/Merval
-  > buy-and-hold + vs plazo fijo. Métricas: cum return, max drawdown, hit rate,
-  > Sharpe, Calmar. Ver spec completa en `docs/HANDOFF-2026-05-30.md` sección 6.
-  > **Archivos:** `brier.py` (walk_forward_with_dates), nuevo `backtest.py`,
-  > `app.py` (GET /backtest/ranking), SQLite (tabla backtest_cache).
+- **10.2 · Backtest del ranking (era 6.9)** `[x]`
+  > ✅ DONE 2026-05-29. `engine/backtesting/ranking.py` (NUEVO): `backtest_ranking()`
+  > con señal RSI(14)+momentum 20d, rebalanceo semanal, walk-forward sin lookahead.
+  > Métricas: cum return estrategia vs SPY vs plazo fijo, hit rate, Sharpe, max drawdown,
+  > tabla de períodos. `validation/brier.py`: `walk_forward_with_dates()` que devuelve
+  > (predictions, labels, dates). `api/app.py`: `GET /backtest/ranking` con TTLCache 1h.
+  > 106/106 tests verde.
 
-- **10.3 · Track-record en UI** `[ ]` — después de 10.2
-  > Panel "¿Tiene edge el motor?" en el workspace. Conectado a `/decisions/track-record`
-  > + `/backtest/ranking` + `/validation/{ticker}` (Brier, ya existe).
-  > **Archivos:** `app.js`, `index.html`, `styles.css`.
+- **10.3 · Track-record en UI** `[x]`
+  > ✅ DONE 2026-05-29. Panel `track-record-panel` en workspace. `loadTrackRecord()` +
+  > `renderTrackRecord()` en app.js: carga `/backtest/ranking` + `/decisions/track-record`
+  > lazy post-bootstrap. Veredicto honesto, tabla de períodos, track record personal.
+  > `.track-record-metrics` responsive (3→2→1 cols). 106/106 tests verde.
 
 ---
 
-## 4.12 · NEW SPRINT — Sprint 11 · Loop del tester + chat como interfaz `[ ]`
+## 4.12 · NEW SPRINT — Sprint 11 · Loop del tester + chat como interfaz `[x]`
 
-- **11.1 · Botón de feedback in-app** `[ ]` — "Reportar algo" que escriba a una
-  tabla `feedback` (o mande mail vía el connector Gmail ya conectado). Cierra el
-  loop de feedback del tester. ~30 min, alto valor.
-- **11.2 · Onboarding mínimo (era 6.10)** `[ ]` — 3 pasos: cargar perfil →
-  importar Balanz → preguntarle al asistente. Sin esto el tester no encuentra el valor.
-- **11.3 · Tool-use del chat (era 8.3b)** `[ ]` — que el bot llame
-  `analyze_ticker` / `get_portfolio_summary` / `compare_to_benchmark` como tools.
-  Convierte el chat de "ChatGPT con contexto pegado" a interfaz principal mágica.
+- **11.1 · Botón de feedback in-app** `[x]`
+  > ✅ DONE 2026-05-29. Tabla `feedback` en SQLite (`_ensure_feedback_schema`).
+  > `POST /feedback` (auth opcional — anónimo OK). FAB flotante bottom-right
+  > (💬), `<dialog>` con textarea, escape cierra, toast "✓ Gracias" al enviar.
+  > CSS `.feedback-fab`, `.feedback-dialog`, `.feedback-textarea`.
+
+- **11.2 · Onboarding mínimo** `[x]`
+  > ✅ DONE 2026-05-29. Overlay `#onboarding-overlay` creado dinámicamente.
+  > 3 pasos: Perfil → Portfolio (import) → Chat. Step dots (pending/active/done).
+  > `maybeShowOnboarding()` disparado en registro (`state.authMode === "register"`).
+  > `dismissOnboarding()` persiste `localStorage.marketBotOnboardingDone=1`.
+  > CSS `.onboarding-overlay`, `.onboarding-card`, `.onboarding-steps`.
+
+- **11.3 · Tool-use del chat** `[x]`
+  > ✅ DONE 2026-05-29. `base.py`: firma `chat(..., tools=None, tool_executor=None)`.
+  > `anthropic_provider.py`: loop tool-use hasta 5 rondas — ejecuta tools, agrega
+  > resultados, continúa hasta `end_turn`. `openai_provider.py` / `gemini_provider.py`:
+  > aceptan parámetros pero los ignoran (graceful degradation).
+  > `app.py`: `_CHAT_TOOLS` (3 tools: `analyze_ticker`, `get_portfolio_summary`,
+  > `get_ranking`) + `_make_tool_executor(current_user)` — solo activo si
+  > `provider.name == "anthropic"`. 106/106 tests verde.
 
 ---
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any, Callable
 
 
 @dataclass
@@ -57,8 +58,16 @@ class ChatProvider(ABC):
         messages: list[ChatMessage],
         system: str | None = None,
         model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_executor: Callable[[str, dict[str, Any]], str] | None = None,
     ) -> ProviderResponse:
-        """Blocking single-shot completion. Streaming lives in v2."""
+        """Blocking single-shot (or tool-loop) completion.
+
+        When ``tools`` and ``tool_executor`` are provided, the provider may
+        execute one or more tool calls before returning the final text.
+        Providers that don't support tool use should ignore both parameters
+        and fall through to a normal completion.
+        """
 
     def estimate_cost(self, tokens_in: int, tokens_out: int, model: str) -> float:
         """Default 0.0 — providers override with their pricing table."""

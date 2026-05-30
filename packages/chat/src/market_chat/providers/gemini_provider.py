@@ -78,6 +78,8 @@ class GeminiChatProvider(ChatProvider):
         messages: list[ChatMessage],
         system: str | None = None,
         model: str | None = None,
+        tools=None,
+        tool_executor=None,
     ) -> ProviderResponse:
         if not self._api_key:
             raise RuntimeError("CHAT_GEMINI_API_KEY is not set.")

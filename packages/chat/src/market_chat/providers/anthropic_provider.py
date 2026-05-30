@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import time
+from typing import Any, Callable
 
 from .base import ChatMessage, ChatProvider, ProviderResponse
 
@@ -53,6 +54,8 @@ class AnthropicChatProvider(ChatProvider):
         messages: list[ChatMessage],
         system: str | None = None,
         model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_executor: Callable[[str, dict[str, Any]], str] | None = None,
     ) -> ProviderResponse:
         # Lazy import — see module docstring.
         import anthropic  # type: ignore
@@ -65,37 +68,83 @@ class AnthropicChatProvider(ChatProvider):
 
         # Anthropic separates the system prompt from the user/assistant turns,
         # and forbids "system" entries inside ``messages``.
-        payload = [
+        payload: list[dict] = [
             {"role": m.role, "content": m.content}
             for m in messages
             if m.role in {"user", "assistant"}
         ]
 
         started = time.perf_counter()
-        response = client.messages.create(
-            model=chosen,
-            system=system or "",
-            max_tokens=1024,
-            messages=payload,
-        )
+        total_in = total_out = 0
+
+        # Tool-use loop: keep calling the model until it stops asking for tools
+        # or we hit the safety limit. Without tools, this runs exactly once.
+        max_tool_rounds = 5
+        for _ in range(max_tool_rounds):
+            kwargs: dict[str, Any] = {
+                "model": chosen,
+                "system": system or "",
+                "max_tokens": 1024,
+                "messages": payload,
+            }
+            if tools:
+                kwargs["tools"] = tools
+
+            response = client.messages.create(**kwargs)
+
+            usage = getattr(response, "usage", None)
+            total_in += int(getattr(usage, "input_tokens", 0) or 0)
+            total_out += int(getattr(usage, "output_tokens", 0) or 0)
+
+            stop_reason = getattr(response, "stop_reason", None)
+            content_blocks = getattr(response, "content", []) or []
+
+            # If no tool calls, collect text and return.
+            tool_use_blocks = [b for b in content_blocks if getattr(b, "type", None) == "tool_use"]
+            if not tool_use_blocks or not tool_executor:
+                text_chunks = [
+                    getattr(b, "text", "")
+                    for b in content_blocks
+                    if getattr(b, "type", None) == "text"
+                ]
+                text = "".join(text_chunks).strip()
+                break
+
+            # Execute each tool call and collect results.
+            # First: append the assistant's tool-use turn to the payload.
+            payload.append({"role": "assistant", "content": content_blocks})
+
+            tool_results = []
+            for tb in tool_use_blocks:
+                tool_name = getattr(tb, "name", "")
+                tool_input = getattr(tb, "input", {}) or {}
+                tool_id = getattr(tb, "id", "")
+                try:
+                    result_text = tool_executor(tool_name, tool_input)
+                except Exception as exc:
+                    result_text = f"Error ejecutando {tool_name}: {exc}"
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": str(result_text),
+                })
+
+            payload.append({"role": "user", "content": tool_results})
+
+            # If stop_reason is "end_turn" there's nothing more to loop.
+            if stop_reason == "end_turn":
+                text = ""
+                break
+        else:
+            text = "(límite de rondas de tool-use alcanzado)"
+
         latency_ms = int((time.perf_counter() - started) * 1000)
-
-        text_chunks: list[str] = []
-        for block in getattr(response, "content", []) or []:
-            text = getattr(block, "text", None)
-            if text:
-                text_chunks.append(text)
-        text = "".join(text_chunks).strip()
-
-        usage = getattr(response, "usage", None)
-        tokens_in = int(getattr(usage, "input_tokens", 0) or 0)
-        tokens_out = int(getattr(usage, "output_tokens", 0) or 0)
 
         return ProviderResponse(
             text=text,
-            tokens_in=tokens_in,
-            tokens_out=tokens_out,
-            cost_usd=self.estimate_cost(tokens_in, tokens_out, chosen),
+            tokens_in=total_in,
+            tokens_out=total_out,
+            cost_usd=self.estimate_cost(total_in, total_out, chosen),
             latency_ms=latency_ms,
             model=chosen,
             provider=self.name,

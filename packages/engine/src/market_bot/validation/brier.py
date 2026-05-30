@@ -128,13 +128,34 @@ def walk_forward_predictions(
     Errors raised by ``predictor`` are skipped so a single bad day doesn't
     abort the whole walk-forward.
     """
+    predictions, labels, _ = walk_forward_with_dates(
+        frame, predictor, warmup=warmup, horizon_days=horizon_days, step_days=step_days
+    )
+    return predictions, labels
+
+
+def walk_forward_with_dates(
+    frame,
+    predictor,
+    *,
+    warmup: int = 60,
+    horizon_days: int = 5,
+    step_days: int = 1,
+) -> tuple[list[float], list[int], list]:
+    """Same as :func:`walk_forward_predictions` but also returns anchor dates.
+
+    Returns ``(predictions, labels, dates)`` where ``dates`` are the index
+    values from ``frame`` at each anchor position.
+    """
     closes = list(frame["Close"]) if "Close" in frame.columns else []
+    index = list(frame.index)
     n = len(closes)
     predictions: list[float] = []
     labels: list[int] = []
+    dates: list = []
 
     if n <= warmup + horizon_days:
-        return predictions, labels
+        return predictions, labels, dates
 
     for anchor in range(warmup, n - horizon_days, max(1, step_days)):
         slice_frame = frame.iloc[: anchor + 1]
@@ -149,5 +170,6 @@ def walk_forward_predictions(
         label = 1 if future_close > anchor_close else 0
         predictions.append(probability_up)
         labels.append(label)
+        dates.append(index[anchor])
 
-    return predictions, labels
+    return predictions, labels, dates

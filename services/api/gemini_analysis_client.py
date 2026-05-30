@@ -31,13 +31,16 @@ class AiAnalysisResult:
 
 class GeminiAnalysisClient:
     provider = "gemini"
-    default_model = "gemini-2.5-pro"
+    default_model = "gemini-2.5-flash"
 
     def __init__(self) -> None:
         self._api_key = self._read_first_env(_API_KEY_ENV_NAMES)
         self._temperature = float(os.getenv("AI_ANALYSIS_GEMINI_TEMPERATURE", "0.15") or 0.15)
+        # 1800 truncaba el análisis: gemini-2.5-flash es "thinking" y consume
+        # parte del budget razonando, y el prompt pide 6 secciones. 4096 da aire
+        # para el razonamiento + un análisis completo sin cortarse.
         self._max_output_tokens = int(
-            os.getenv("AI_ANALYSIS_GEMINI_MAX_OUTPUT_TOKENS", "1800") or 1800
+            os.getenv("AI_ANALYSIS_GEMINI_MAX_OUTPUT_TOKENS", "4096") or 4096
         )
         self._sdk_configured = False
 
@@ -94,7 +97,13 @@ class GeminiAnalysisClient:
                 request_options={"timeout": 25},
             )
         except Exception as exc:
-            raise RuntimeError("No se pudo completar el análisis con Gemini.") from exc
+            message = str(exc)
+            if "ResourceExhausted" in message or "quota" in message.lower():
+                raise RuntimeError(
+                    f"{chosen_model} no está disponible para esta API key o cuota actual. "
+                    "Necesitás habilitar billing/cuota para ese modelo o cambiar a otro."
+                ) from exc
+            raise RuntimeError(f"No se pudo completar el análisis con Gemini: {message}") from exc
         latency_ms = int((time.perf_counter() - started) * 1000)
 
         text = ""

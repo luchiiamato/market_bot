@@ -44,7 +44,7 @@ def test_provider_base_subclass_returns_false_when_unconfigured():
         def is_configured(self) -> bool:
             return False
 
-        def chat(self, messages, system=None, model=None):  # pragma: no cover
+        def chat(self, messages, system=None, model=None, tools=None, tool_executor=None):  # pragma: no cover
             return ProviderResponse("", 0, 0, 0.0, 0, "dummy-1", "dummy")
 
     assert DummyProvider().is_configured() is False
@@ -68,7 +68,7 @@ class _FakeProvider:
     def is_configured(self) -> bool:
         return self._configured
 
-    def chat(self, messages, system=None, model=None):
+    def chat(self, messages, system=None, model=None, tools=None, tool_executor=None):
         from market_chat.providers.base import ProviderResponse
 
         self.calls.append({"messages": list(messages), "system": system, "model": model})
